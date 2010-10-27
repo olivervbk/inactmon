@@ -78,6 +78,7 @@ while True:
 			message,
 			"notification-message-email")
 		notification.set_urgency(pynotify.URGENCY_NORMAL)
+		notification.set_hint_string("x-canonical-append","")
 #		notification.attach_to_widget(self)
 		if not notification.show():
 			print "Unable to show notification"
