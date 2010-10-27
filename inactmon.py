@@ -44,7 +44,10 @@ class MyTCPHandler(SocketServer.BaseRequestHandler):
 
 def tcpServer(host, port, max_clients):
 	debug("tcpServer:start")
-	server = ThreadedTCPServer( (str(host),int(port)), MyTCPHandler)
+	try:
+		server = ThreadedTCPServer( (str(host),int(port)), MyTCPHandler)
+	except:
+		print "meh"
 	server.serve_forever()
 	debug("tcpServer:stop")
 
@@ -75,7 +78,7 @@ def netMon(iface, ipAddresses):
 		(header, payload) = cap.next()
 
 		rip = ImpactDecoder.EthDecoder().decode(payload)
-#		macAddr = rip.as_eth_addr(rip.get_ether_shost());
+#		macAddr = rip.as_eth_addr(rip.get_ether_shost())
 		dstAddr = rip.child().get_ip_dst()
 		srcAddr = rip.child().get_ip_src()
 		srcPort = str(rip.child().child().get_th_sport())
@@ -117,7 +120,12 @@ def checkInterface(iface):
 	ipAddresses = [] 
 
 	# check if there are interfaces available with pcapy
-	ifs = pcapy.findalldevs()
+	try:
+		ifs = pcapy.findalldevs()
+	except pcapy.PcapError:
+		print "Unable to get interfaces. Are you running as root?"
+		sys.exit(1)
+
 	if 0 == len(ifs):
 		print "No interfaces available."
 		sys.exit(1)

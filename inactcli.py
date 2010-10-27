@@ -12,7 +12,7 @@ import argparse
 DEFAULT_PORT = 9123
 DEFAULT_SERVER = 'localhost'
 
-parser = argparse.ArgumentParser(description='Incomming Netword Activity Client.')
+parser = argparse.ArgumentParser(description='Incoming Netword Activity Client.')
 parser.add_argument('-p', '--port',
 	dest='port',
 	required=False,
@@ -68,26 +68,23 @@ if sock is None:
     print 'Error: could not open socket'
     sys.exit(1)
 
+print "Connected to server"
 while True:
 	try:
 		message = sock.recv(1024)
 		print message
+		notification = pynotify.Notification(
+			"Inactcli",
+			message,
+			"notification-message-email")
+		notification.set_urgency(pynotify.URGENCY_NORMAL)
+#		notification.attach_to_widget(self)
+		if not notification.show():
+			print "Unable to show notification"
+	except KeyboardInterrupt:
+		print "User terminated..."
+		break
 	except:
-		print "Error ocurred"
+		print "Unexpected error ocurred:",sys.exc_info()[0]
 		break
 sock.close()
-sys.exit(0)
-
-notification = pynotify.Notification(
-	"Test", 
-	time.strftime("%H:%M:%S", time.localtime()),
-	"notification-message-email")
-notification.set_urgency(pynotify.URGENCY_NORMAL)
-notification.attach_to_widget('self')
-#notification.set_timeout(1)
-
-if not notification.show():
-	print "Failed to send notification"
-	sys.exit(1)
-
-
