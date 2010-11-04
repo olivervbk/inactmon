@@ -8,6 +8,8 @@ import time
 import datetime
 import socket
 
+import inspect
+
 import argparse
 import pynotify
 
@@ -19,23 +21,33 @@ DEFAULT_PORT = 9123
 DEFAULT_SERVER = 'localhost'
 
 def exit_gracefully():
-	print "exiting..."
+	print "exiting gracefully..."
 	sys.exit(0)
 
 class notificationManager(threading.Thread):
+	__name__='notificationManager'
+	server = ''
+	port = ''
+
+	def debug(self,message, level):
+		classname = self.__name__
+		caller = '('+classname+')'+inspect.stack()[1][3]
+		debug(caller, message,level)
+
 	def __init__(self, server, port):
-		print "notificationManager:init"
+		gtk.gdk.threads_init() # this makes gtk to allow threads =/
+		self.debug("init", "info")
 		self.server = server
 		self.port = port
 		threading.Thread.__init__(self)
-		print "porra"
+		self.debug("init done","info")
 
 	def run(self):
-		print "notificationManager:run"
+		self.debug("run", "info")
 		if not pynotify.init('Inactcli'):
-			debug("Could not start pynotify")
+			debug("Could not init pynotify", "fatal")
 			exit_gracefully()
-		debug("Pynotify init successful")
+		self.debug("Pynotify init successful", "info")
 	
 		sock = None
 		for res in socket.getaddrinfo(self.server, int(self.port), socket.AF_UNSPEC, socket.SOCK_STREAM):
@@ -53,16 +65,19 @@ class notificationManager(threading.Thread):
 				continue
 			break
 		if sock is None:
-			print "Could not open socket"
+			self.debug("Could not open socket. Retrying...", "warn")
 			# wait 
 			# retry
 			self.run()
 	
-		debug("Connected to server")
+		self.debug("Connected to server", "info")
 		while True:
 			try:
-				message = sock.recv(1024)
-				debug("Message recv:"+str(message))
+				message = str(sock.recv(1024))
+				message = message[:-1] # remove trailing newlines
+
+				print "Message recv:"+message
+
 				notification = pynotify.Notification(
 					"Inactcli",
 					message,
@@ -72,16 +87,47 @@ class notificationManager(threading.Thread):
 #				notification.attach_to_widget(self)
 				if not notification.show():
 					print "Unable to show notification"
+			except KeyboardInterrupt:
+				print "notMan:Terminated by user"
+				sock.close()
+				exit_gracefully()
+				break
+
 			except:
-				print "Terminated! Error:",sys.exc_info()[0]
+				print "notMan:Terminated! Error:",sys.exc_info()[0]
+				sock.close()
+				exit_gracefully()
 				break
 		sock.close()
 		exit_gracefully()
+
+
+
+def toggle_status(widget, event=None):
+	global ind
+	global status_item
+	global status
+	print "status_clicked:",event
+	if ind.get_status() == appindicator.STATUS_ACTIVE:
+		ind.set_status(appindicator.STATUS_ATTENTION)
+		status_item.set_label("Enable")
+	else:
+		ind.set_status(appindicator.STATUS_ACTIVE)
+		status_item.set_label("Disable")
+	print "new label:", status_item.get_label()
+
+def destroy(widget, event=None):
+	print "Quitting via tray..."
+	exit_gracefully()
+
+def about(widget, event=None):
+	print "Status clicked..."
 	
-def debug(message):
+
+def debug(caller,message,level):
 	global args
 	if args.verbose:
-		print "DEBUG",str(message)
+		print level+':'+str(caller)+':'+str(message)
 
 
 parser = argparse.ArgumentParser(description='Incoming Netword Activity Client.')
@@ -118,29 +164,20 @@ parser.add_argument('-q','--quiet',
 args = parser.parse_args()
 verbose = args.verbose
 
-def toggle_status(widget, event=None):
-	global ind
-	global status_item
-	global status
-	print "status_clicked:",event
-	if ind.get_status() == appindicator.STATUS_ACTIVE:
-		ind.set_status(appindicator.STATUS_ATTENTION)
-		status_item.set_label("Enable")
-	else:
-		ind.set_status(appindicator.STATUS_ACTIVE)
-		status_item.set_label("Disable")
-	print "new label:", status_item.get_label()
 
-def destroy(widget, event=None):
-	print "Quitting via tray..."
-	exit_gracefully()
 
-def about(widget, event=None):
-	print "Status clicked..."
+
+
+# notMan = notificationManager(args.server, args.port)
+
+debug("main","Threading notificationManager","info")
+notMan = notificationManager( args.server, args.port)
+notMan.setDaemon(True)
+notMan.start()
 
 ind = appindicator.Indicator ("inactcli",
-		"indicator-messages",
-		appindicator.CATEGORY_APPLICATION_STATUS)
+	"indicator-messages",
+	appindicator.CATEGORY_APPLICATION_STATUS)
 ind.set_status (appindicator.STATUS_ACTIVE)
 ind.set_attention_icon ("new-messages-red")
 # create a menu
@@ -162,12 +199,9 @@ quit_item.show()
 menu.append(quit_item)
 
 ind.set_menu(menu)
-
-# notMan = notificationManager(args.server, args.port)
-
-debug("Threading notificationManager")
-notMan = notificationManager( args.server, args.port)
-notMan.setDaemon(True)
-notMan.start()
-
-gtk.main()
+try:
+	gtk.main()
+	#time.sleep(50)
+except:
+	print "notMan:Terminated! Error:",sys.exc_info()[0]
+	exit_gracefully()
