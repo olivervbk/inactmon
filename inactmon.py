@@ -35,7 +35,7 @@ class MyTCPHandler(SocketServer.BaseRequestHandler):
 		while True:
 			message = myqueue.get(index)
 			try:
-				self.request.send(message)
+				self.request.send(message+"\n")
 				print "Sent message"
 			except:
 				print "Client died..."

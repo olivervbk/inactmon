@@ -2,12 +2,14 @@
 
 import signal
 import os, os.path
-import pynotify
+import threading
 import sys
 import time
 import datetime
 import socket
+
 import argparse
+import pynotify
 
 import gobject
 import gtk
@@ -20,48 +22,67 @@ def exit_gracefully():
 	print "exiting..."
 	sys.exit(0)
 
-def notificationManager():
-	if not pynotify.init( 'Inactcli' ):
-		debug("Could not start pynotify")
-		exit_gracefully()
+class notificationManager(threading.Thread):
+	def __init__(self, server, port):
+		print "notificationManager:init"
+		self.server = server
+		self.port = port
+		threading.Thread.__init__(self)
+		print "porra"
 
-	sock = None
-	for res in socket.getaddrinfo(args.server, int(args.port), socket.AF_UNSPEC, socket.SOCK_STREAM):
-		af, socktype, proto, canonname, sa = res
-	    	try:
-		        sock = socket.socket(af, socktype, proto)
-		except socket.error, msg:
-			sock = None
-			continue
-		try:
-			sock.connect(sa)
-		except socket.error, msg:
-			sock.close()
-			sock = None
-			continue
-		break
-	if sock is None:
-		print "Could not open socket"
-		exit_gracefully()
-
-	debug("Connected to server")
-	while True:
-		try:
-			message = sock.recv(1024)
-			debug("Message recv:"+str(message))
-			notification = pynotify.Notification(
-				"Inactcli",
-				message,
-				"notification-message-email")
-			notification.set_urgency(pynotify.URGENCY_NORMAL)
-			notification.set_hint_string("x-canonical-append","")
-#			notification.attach_to_widget(self)
-			if not notification.show():
-				print "Unable to show notification"
-		except:
-			print "Terminated! Error:",sys.exc_info()[0]
+	def run(self):
+		print "notificationManager:run"
+		if not pynotify.init('Inactcli'):
+			debug("Could not start pynotify")
+			exit_gracefully()
+		debug("Pynotify init successful")
+	
+		sock = None
+		for res in socket.getaddrinfo(self.server, int(self.port), socket.AF_UNSPEC, socket.SOCK_STREAM):
+			af, socktype, proto, canonname, sa = res
+		    	try:
+			        sock = socket.socket(af, socktype, proto)
+			except socket.error, msg:
+				sock = None
+				continue
+			try:
+				sock.connect(sa)
+			except socket.error, msg:
+				sock.close()
+				sock = None
+				continue
 			break
-	sock.close()
+		if sock is None:
+			print "Could not open socket"
+			# wait 
+			# retry
+			self.run()
+	
+		debug("Connected to server")
+		while True:
+			try:
+				message = sock.recv(1024)
+				debug("Message recv:"+str(message))
+				notification = pynotify.Notification(
+					"Inactcli",
+					message,
+					"notification-message-email")
+				notification.set_urgency(pynotify.URGENCY_NORMAL)
+				notification.set_hint_string("x-canonical-append","")
+#				notification.attach_to_widget(self)
+				if not notification.show():
+					print "Unable to show notification"
+			except:
+				print "Terminated! Error:",sys.exc_info()[0]
+				break
+		sock.close()
+		exit_gracefully()
+	
+def debug(message):
+	global args
+	if args.verbose:
+		print "DEBUG",str(message)
+
 
 parser = argparse.ArgumentParser(description='Incoming Netword Activity Client.')
 parser.add_argument('-p', '--port',
@@ -97,53 +118,56 @@ parser.add_argument('-q','--quiet',
 args = parser.parse_args()
 verbose = args.verbose
 
-exit_gracefully()
-
-def status_clicked(widget, event=None):
+def toggle_status(widget, event=None):
 	global ind
 	global status_item
-	global menu
+	global status
 	print "status_clicked:",event
-	print "old label:",status_item.get_child().get_label()
 	if ind.get_status() == appindicator.STATUS_ACTIVE:
-		print "changed to attention"
 		ind.set_status(appindicator.STATUS_ATTENTION)
-		status_item.get_child().set_label("Change To Act")
+		status_item.set_label("Enable")
 	else:
-		print "changed to active"
 		ind.set_status(appindicator.STATUS_ACTIVE)
-		status_item.get_child().set_label("Change To Att")
-#	status_item.realize()
-#	status_item.map()
-#	status_item.queue_draw()
-	menu.queue_draw()
-	print "new label:", status_item.get_child().get_label()
+		status_item.set_label("Disable")
+	print "new label:", status_item.get_label()
 
 def destroy(widget, event=None):
-	print "destroyed"
-	sys.exit(0)
+	print "Quitting via tray..."
+	exit_gracefully()
 
-if __name__ == "__main__":
-	ind = appindicator.Indicator ("example-simple-client",
-			"indicator-messages",
-			appindicator.CATEGORY_APPLICATION_STATUS)
-	ind.set_status (appindicator.STATUS_ACTIVE)
-	ind.set_attention_icon ("new-messages-red")
-  	# create a menu
-   	menu = gtk.Menu()
+def about(widget, event=None):
+	print "Status clicked..."
 
-	status_item = gtk.MenuItem("Porra")
-	status_item.connect("activate", status_clicked, "status clicked")
-	status_item.show()
-	menu.append(status_item)
+ind = appindicator.Indicator ("inactcli",
+		"indicator-messages",
+		appindicator.CATEGORY_APPLICATION_STATUS)
+ind.set_status (appindicator.STATUS_ACTIVE)
+ind.set_attention_icon ("new-messages-red")
+# create a menu
+menu = gtk.Menu()
 
-	quit_item = gtk.MenuItem("Quit")
-	quit_item.connect("activate", destroy, "file.quit")
-	quit_item.show()
-	menu.append(quit_item)
+status_item = gtk.MenuItem("Disable")
+status_item.connect("activate", toggle_status, "status clicked")
+status_item.show()
+menu.append(status_item)
 
-	status_item.get_child().set_label("Change To Att")
+about_item = gtk.MenuItem("About")
+about_item.connect("activate", about,"about")
+about_item.show()
+menu.append(about_item)
 
-  	ind.set_menu(menu)
+quit_item = gtk.MenuItem("Quit")
+quit_item.connect("activate", destroy, "file.quit")
+quit_item.show()
+menu.append(quit_item)
 
-    	gtk.main()
+ind.set_menu(menu)
+
+# notMan = notificationManager(args.server, args.port)
+
+debug("Threading notificationManager")
+notMan = notificationManager( args.server, args.port)
+notMan.setDaemon(True)
+notMan.start()
+
+gtk.main()
