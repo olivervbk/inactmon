@@ -18,9 +18,9 @@ import pcapy
 import impacket
 from impacket import ImpactDecoder
 
-MAX_CLIENTS = 5
+DEFAULT_MAX_CLIENTS = 5
 DEFAULT_PORT = 9123
-DEFAULT_IFACE = 'lo'
+DEFAULT_BIND_ADDRESS = '0.0.0.0'
 
 class ThreadedTCPServer(SocketServer.ThreadingMixIn, SocketServer.TCPServer):
 	pass
@@ -180,18 +180,18 @@ signal.signal(signal.SIGHUP, signal_handler)
 
 parser = argparse.ArgumentParser(description='Monitor connection attempts.')
 
-parser.add_argument('-c','--capture', 
-	dest='capture', 
+parser.add_argument('-i','--interface', 
+	dest='interface', 
 	required=True, 
 	metavar='iface', 
 	help='Interface to capture on.')
 
-parser.add_argument('-i','--iface', 
-	dest='interface', 
+parser.add_argument('-b','--bind', 
+	dest='bind', 
 	required=False, 
-	metavar='iface', 
-	default=DEFAULT_IFACE,
-	help='Interface to listen for clients.')
+	metavar='address', 
+	default=DEFAULT_BIND_ADDRESS,
+	help='Ip to listen for clients(default is '+str(DEFAULT_BIND_ADDRESS)+').')
 
 # IMPLEMENT!
 # !!! implement file
@@ -216,7 +216,7 @@ parser.add_argument('-m','--max-clients',
 	required=False, 
 	dest='max-clients', 
 	metavar='clients',
-	help='Number of allowed clients(default is '+str(MAX_CLIENTS)+').')
+	help='Number of allowed clients(default is '+str(DEFAULT_MAX_CLIENTS)+').')
 
 parser.add_argument('-v','--verbose', 
 	required=False, 
@@ -248,10 +248,10 @@ verbose = args.verbose
 myqueue = myQueue(MAX_CLIENTS, 0)
 
 debug('Checking interface '+str(args.interface))
-ipAddresses = checkInterface(args.interface)
+captureAddresses = checkInterface(args.interface)
 
 debug('Starting tcpServer thread')
-tcpServer_thread = threading.Thread(target=tcpServer, args=('localhost',int(args.port), MAX_CLIENTS))
+tcpServer_thread = threading.Thread(target=tcpServer, args=(args.bind,int(args.port), args.max-clients))
 tcpServer_thread.setDaemon(True)
 tcpServer_thread.start()
 debug("tcpServer running in thread:"+str(tcpServer_thread.getName()))
