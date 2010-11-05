@@ -22,11 +22,38 @@ DEFAULT_MAX_CLIENTS = 5
 DEFAULT_PORT = 9123
 DEFAULT_BIND_ADDRESS = '0.0.0.0'
 
+class myQueue:
+	maxclients = 0
+	queue = []
+	available = []
+
+	def __init__(self,maxclients, maxsizes):
+		self.maxclients = maxclients
+		for i in range(0, maxclients):
+			self.queue.insert(i, Queue.Queue(maxsizes))
+			self.available.append(i)
+
+	def init(self):
+		if len(self.available) == 0:
+			return False
+		return self.available.pop()
+		
+	def release(self,index):
+		self.available.append(index)
+
+	def add(self,message):
+		for i in range(0,self.maxclients):
+			self.queue[i].put_nowait(message)
+		
+	def get(self,index):
+		return self.queue[index].get()
+
 class ThreadedTCPServer(SocketServer.ThreadingMixIn, SocketServer.TCPServer):
 	pass
 
 class MyTCPHandler(SocketServer.BaseRequestHandler):
 	def handle(self):
+# !!! myqueue should not be global -> __init__(self,myqueue): +SocketServer.__init__ ? =/
 		global myqueue
 		index = myqueue.init()
 		if index == False:
@@ -43,54 +70,101 @@ class MyTCPHandler(SocketServer.BaseRequestHandler):
 				break
 		myqueue.release(index)
 
+# !!! change to class threading ? =/
 def tcpServer(host, port, max_clients):
 	debug("tcpServer:start")
+	server = None
 	try:
 		server = ThreadedTCPServer( (str(host),int(port)), MyTCPHandler)
 	except:
-		print "meh"
+		print "tcpServer could not start:",sys.exc_info()[0]
+
+	if server is None:
+		print "server is none"
+		sys.exit(666)
 	server.serve_forever()
 	debug("tcpServer:stop")
 
-def netMon(iface, ipAddresses):
-	global myqueue
-	debug("netMon:start")
+class netMon(threading.Thread):
+	class netMonMessenger:
+		def __init__(self):
+			debug("netMonMessenger:nothing to do")
+		
+		def tcpParser(self, payload):
+			rip = ImpactDecoder.EthDecoder().decode(payload)
 
-	# Arguments here are:
-	#   device
-	#   snaplen (maximum number of bytes to capture _per_packet_)
-	#   promiscious mode (1 for true)
-	#   timeout (in milliseconds)
+			print "porra"
+			print rip
+			print "ethertype:",rip.get_ether_type()
+			if rip.child().child().get_ACK():
+				print "is ACK"
+			if rip.child().child().get_SYN():
+				print "is SYN"
+			if rip.child().child().get_FIN():
+				print "is FIN"
+			if rip.child().child().get_RST():
+				print "is FIN"
 
-	cap = pcapy.open_live(iface, 1500, 0, 0)
-	if pcapy.DLT_EN10MB != cap.datalink():
-		print "Interface is not ethernet based. Quitting..."
-		return; # this should exit the thread..?
+			print "ethertype2:",rip.child().child().get_ether_type()
 
-# !!!
-	print "%s: net=%s, mask=%s, addrs=%s" % (iface, cap.getnet(), cap.getmask(), str(ipAddresses))
 
-	debug('Setting filter')
-# !!! improve filter
-	cap.setfilter('tcp[13] = 2')
+	#		macAddr = rip.as_eth_addr(rip.get_ether_shost())
+			dstAddr = rip.child().get_ip_dst()
+			srcAddr = rip.child().get_ip_src()
+			srcPort = str(rip.child().child().get_th_sport())
+			dstPort = str(rip.child().child().get_th_dport())
+			
+			status = 'unknown'
 
-	debug('Waiting for packet...')
-	while True:
-		(header, payload) = cap.next()
+			message = 'tcp:'+srcAddr+':'+srcPort+':'+dstAddr+':'+dstPort+':'+status
 
-		rip = ImpactDecoder.EthDecoder().decode(payload)
-#		macAddr = rip.as_eth_addr(rip.get_ether_shost())
-		dstAddr = rip.child().get_ip_dst()
-		srcAddr = rip.child().get_ip_src()
-		srcPort = str(rip.child().child().get_th_sport())
-		dstPort = str(rip.child().child().get_th_dport())
+			return message
+	args = None
+	ipAddresses = None
 
-		message = srcAddr+":"+srcPort+"->"+dstAddr+":"+dstPort
-		debug(message)
-		# queueMessages.put(message)
-		myqueue.add(message)
+	def __init__(self,args,ipAddresses):
+		self.args = args
+		self.ipAddresses = ipAddresses
+		threading.Thread.__init__(self)
+		debug("netMon:init")
 
-	debug("netMon:stop")
+	def run(self):
+		global myqueue
+		debug("netMon:run")
+		messenger = self.netMonMessenger()
+
+		# Arguments here are:
+		#   device
+		#   snaplen (maximum number of bytes to capture _per_packet_)
+		#   promiscious mode (1 for true)
+		#   timeout (in milliseconds)
+	
+		cap = pcapy.open_live(self.args.interface, 1500, 0, 0)
+		if pcapy.DLT_EN10MB != cap.datalink():
+			print "Interface is not ethernet based. Quitting..."
+			return; # this should exit the thread..?
+
+	# !!!
+		print "%s: net=%s, mask=%s, addrs=%s" % (self.args.interface, cap.getnet(), cap.getmask(), str(self.ipAddresses))
+
+		debug('Setting filter')
+	# !!! improve filter
+		cap.setfilter('tcp[13] = 2')
+
+		debug('Waiting for packet...')
+		while True:
+			(header, payload) = cap.next()
+
+			# !!!
+			proto = 'tcp'
+			message = 'err:proto not found'
+			if proto is 'tcp':
+				message = messenger.tcpParser(payload)
+			debug(message)
+			# queueMessages.put(message)
+			myqueue.add(message)
+
+		debug("netMon:stop")
 
 
 def signal_handler(signal_recv, frame):
@@ -108,14 +182,14 @@ def exit_gracefully():
 def reload_config():
 	print "\nreload config"
 
-def debug(message):
-	global verbose
-	if(verbose):
-		print "DEBUG:"+str(message)
-
 def log(message):
 	debug("LOG:"+str(message))
 	# print "LOG:"+str(message)
+
+def debug(message):
+	global args
+	if args.verbose:
+		print 'DEBUG:'+str(message)
 
 def checkInterface(iface):
 	ipAddresses = [] 
@@ -149,31 +223,7 @@ def checkInterface(iface):
 				sys.exit(1)
 	return ipAddresses
 
-class myQueue:
-	maxclients = 0
-	queue = []
-	available = []
 
-	def __init__(self,maxclients, maxsizes):
-		self.maxclients = maxclients
-		for i in range(0, maxclients):
-			self.queue.insert(i, Queue.Queue(maxsizes))
-			self.available.append(i)
-
-	def init(self):
-		if len(self.available) == 0:
-			return False
-		return self.available.pop()
-		
-	def release(self,index):
-		self.available.append(index)
-
-	def add(self,message):
-		for i in range(0,self.maxclients):
-			self.queue[i].put_nowait(message)
-		
-	def get(self,index):
-		return self.queue[index].get()
 	
 signal.signal(signal.SIGINT, signal_handler)
 signal.signal(signal.SIGHUP, signal_handler)
@@ -208,6 +258,13 @@ parser.add_argument('-p', '--port',
 	default=DEFAULT_PORT,
 	help='Port to listen for clients. If a file is specified will create socket at file(default is '+str(DEFAULT_PORT)+').')
 
+parser.add_argument('-c','--conf', 
+	required=False, 
+	dest='config',
+	type=file, 
+	metavar='config-file',
+	help='File holding the configuration.')
+
 # IMPLEMENT!
 # !!! implement in log function
 parser.add_argument('-l','--log', 
@@ -220,7 +277,7 @@ parser.add_argument('-l','--log',
 # IMPLEMENT
 parser.add_argument('-m','--max-clients', 
 	required=False, 
-	dest='max-clients', 
+	dest='maxclients', 
 	metavar='clients',
 	help='Number of allowed clients(default is '+str(DEFAULT_MAX_CLIENTS)+').')
 
@@ -251,23 +308,21 @@ parser.add_argument('-q','--quiet',
 args = parser.parse_args()
 verbose = args.verbose
 
-myqueue = myQueue(MAX_CLIENTS, 0)
+myqueue = myQueue(DEFAULT_MAX_CLIENTS, 0)
 
 debug('Checking interface '+str(args.interface))
-captureAddresses = checkInterface(args.interface)
+ipAddresses = checkInterface(args.interface)
 
 debug('Starting tcpServer thread')
-tcpServer_thread = threading.Thread(target=tcpServer, args=(args.bind,int(args.port), args.max-clients))
+tcpServer_thread = threading.Thread(target=tcpServer, args=(args.bind,int(args.port), args.maxclients))
 tcpServer_thread.setDaemon(True)
 tcpServer_thread.start()
-debug("tcpServer running in thread:"+str(tcpServer_thread.getName()))
 
 
 debug('Starting netMon thread')
-netMon_thread = threading.Thread(target=netMon, args=(args.interface, ipAddresses))
+netMon_thread = netMon(args, ipAddresses)
 netMon_thread.setDaemon(True)
 netMon_thread.start()
-debug("netMon running in thread:"+str(netMon_thread.getName()))
 
 #!! does nothing, could have been a thread..
 while True:
