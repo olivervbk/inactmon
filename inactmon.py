@@ -90,33 +90,71 @@ class netMon(threading.Thread):
 		def __init__(self):
 			debug("netMonMessenger:nothing to do")
 		
-		def tcpParser(self, payload):
+		def parse(self,payload):
 			rip = ImpactDecoder.EthDecoder().decode(payload)
-
-			print "porra"
+			
 			print rip
-			print "ethertype:",rip.get_ether_type()
+			proto = -1
+			try:
+				proto = rip.child().get_ip_p()
+			except AttributeError:
+				pass
+
+			if proto == 6:
+				debug('netMonMessenger:parse:is tcp!')
+				return self.tcpParser(rip)
+			if proto == 17:
+				debug('netMonMessenger:parse:is UDP!')
+				return self.udpParser(rip)
+			if proto == 1:
+				debug('netMonMessenger:parse:is ICMP')
+				return 'icmp: not implemented'
+			debug('netMonMessenger:parse:unknown ether type:'+str(rip.get_ether_type())+' with proto:'+str(proto))
+			debug(rip)
+			return self.message('error','proto not found')
+
+		def message(self,status, message):
+			if status is 'error':
+				return "err:"+str(message)
+			if status is 'info':
+				return "info:"+str(message)
+			return "meh"
+
+		def tcpParser(self, rip):
+			status = 'unknown'
+
 			if rip.child().child().get_ACK():
-				print "is ACK"
+				status = 'ack'
 			if rip.child().child().get_SYN():
-				print "is SYN"
+				status = 'syn'
 			if rip.child().child().get_FIN():
-				print "is FIN"
+				status = 'fin'
 			if rip.child().child().get_RST():
-				print "is FIN"
-
-			print "ethertype2:",rip.child().child().get_ether_type()
-
+				status = 'rst'
 
 	#		macAddr = rip.as_eth_addr(rip.get_ether_shost())
 			dstAddr = rip.child().get_ip_dst()
 			srcAddr = rip.child().get_ip_src()
 			srcPort = str(rip.child().child().get_th_sport())
 			dstPort = str(rip.child().child().get_th_dport())
+			seq = str(rip.child().child().get_th_seq())
 			
+			
+
+			message = 'tcp:'+srcAddr+':'+srcPort+':'+dstAddr+':'+dstPort+':'+seq+':'+status
+
+			return message
+
+		def udpParser(self, rip):
 			status = 'unknown'
 
-			message = 'tcp:'+srcAddr+':'+srcPort+':'+dstAddr+':'+dstPort+':'+status
+			
+			dstAddr = rip.child().get_ip_dst()
+			srcAddr = rip.child().get_ip_src()
+			srcPort = str(rip.child().child().get_uh_sport())
+			dstPort = str(rip.child().child().get_uh_dport())
+			
+			message = 'udp:'+srcAddr+':'+srcPort+':'+dstAddr+':'+dstPort
 
 			return message
 	args = None
@@ -147,19 +185,18 @@ class netMon(threading.Thread):
 	# !!!
 		print "%s: net=%s, mask=%s, addrs=%s" % (self.args.interface, cap.getnet(), cap.getmask(), str(self.ipAddresses))
 
-		debug('Setting filter')
+		debug('NOT Setting filter')
 	# !!! improve filter
-		cap.setfilter('tcp[13] = 2')
+		# cap.setfilter('tcp[13] = 2')
 
 		debug('Waiting for packet...')
 		while True:
-			(header, payload) = cap.next()
+			try:
+				(header, payload) = cap.next()
+			except:
+				print "cap.next() exception:"+sys.exc_info()[0]
 
-			# !!!
-			proto = 'tcp'
-			message = 'err:proto not found'
-			if proto is 'tcp':
-				message = messenger.tcpParser(payload)
+			message = messenger.parse(payload)
 			debug(message)
 			# queueMessages.put(message)
 			myqueue.add(message)
