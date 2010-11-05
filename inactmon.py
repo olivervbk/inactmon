@@ -186,6 +186,12 @@ parser.add_argument('-i','--interface',
 	metavar='iface', 
 	help='Interface to capture on.')
 
+parser.add_argument('-s','--promiscuous', 
+	dest='promiscuous', 
+	required=False,  
+	action='store_true',
+	help='Set the capture interface to promiscuous. Might be needed by some options.')
+
 parser.add_argument('-b','--bind', 
 	dest='bind', 
 	required=False, 
