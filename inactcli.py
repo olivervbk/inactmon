@@ -176,10 +176,11 @@ notMan.setDaemon(True)
 notMan.start()
 
 ind = appindicator.Indicator ("inactcli",
-	"indicator-messages",
+	"inactcli-active",
 	appindicator.CATEGORY_APPLICATION_STATUS)
 ind.set_status (appindicator.STATUS_ACTIVE)
-ind.set_attention_icon ("new-messages-red")
+# ind.set_passive_icon("inactcli-passive")
+ind.set_attention_icon ("inactcli-attention")
 # create a menu
 menu = gtk.Menu()
 
