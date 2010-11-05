@@ -20,6 +20,7 @@ from impacket import ImpactDecoder
 
 MAX_CLIENTS = 5
 DEFAULT_PORT = 9123
+DEFAULT_IFACE = 'lo'
 
 class ThreadedTCPServer(SocketServer.ThreadingMixIn, SocketServer.TCPServer):
 	pass
@@ -178,11 +179,19 @@ signal.signal(signal.SIGINT, signal_handler)
 signal.signal(signal.SIGHUP, signal_handler)
 
 parser = argparse.ArgumentParser(description='Monitor connection attempts.')
-parser.add_argument('-i','--interface', 
-	dest='interface', 
+
+parser.add_argument('-c','--capture', 
+	dest='capture', 
 	required=True, 
 	metavar='iface', 
-	help='Interface to listen on.')
+	help='Interface to capture on.')
+
+parser.add_argument('-i','--iface', 
+	dest='interface', 
+	required=False, 
+	metavar='iface', 
+	default=DEFAULT_IFACE,
+	help='Interface to listen for clients.')
 
 # IMPLEMENT!
 # !!! implement file
@@ -191,7 +200,7 @@ parser.add_argument('-p', '--port',
 	required=False,
 	metavar='port',
 	default=DEFAULT_PORT,
-	help='Port to listen for clients. If a file is specified will create socket at file.')
+	help='Port to listen for clients. If a file is specified will create socket at file(default is '+str(DEFAULT_PORT)+').')
 
 # IMPLEMENT!
 # !!! implement in log function
@@ -202,14 +211,27 @@ parser.add_argument('-l','--log',
 	metavar='log-file',
 	help='File to log to.')
 
-# IMPLEMENT!
+# IMPLEMENT
+parser.add_argument('-m','--max-clients', 
+	required=False, 
+	dest='max-clients', 
+	metavar='clients',
+	help='Number of allowed clients(default is '+str(MAX_CLIENTS)+').')
+
 parser.add_argument('-v','--verbose', 
 	required=False, 
 	dest='verbose', 
 	action='store_true', 
 	help='More output.')
 
-# IMPLEMENT!
+# IMPLEMENT: do not go to background ?
+parser.add_argument('-d','--debug', 
+	required=False, 
+	dest='debug', 
+	action='store_true', 
+	help='Show all output.')
+
+# IMPLEMENT
 parser.add_argument('-q','--quiet', 
 	required=False, 
 	dest='verbose', 

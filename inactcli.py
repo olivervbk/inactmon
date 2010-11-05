@@ -180,7 +180,7 @@ ind = appindicator.Indicator ("inactcli",
 	appindicator.CATEGORY_APPLICATION_STATUS)
 ind.set_status (appindicator.STATUS_ACTIVE)
 # ind.set_passive_icon("inactcli-passive")
-ind.set_attention_icon ("inactcli-attention")
+ind.set_attention_icon ("inactcli-passive")
 # create a menu
 menu = gtk.Menu()
 
