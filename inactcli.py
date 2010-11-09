@@ -84,12 +84,12 @@ class notificationManager(threading.Thread):
 			message = str(message)
 			message = message[:-1] # remove trailing newlines
 			print "Message recv:"+message
-			self.messageParser(message)
+			
 			try:
 
 				notification = pynotify.Notification(
 					"Inactcli",
-					message,
+					self.messageParser(message),
 					"notification-message-email")
 				notification.set_urgency(pynotify.URGENCY_NORMAL)
 				notification.set_hint_string("x-canonical-append","")
@@ -186,8 +186,7 @@ ind = appindicator.Indicator ("inactcli",
 	"inactcli-active",
 	appindicator.CATEGORY_APPLICATION_STATUS)
 ind.set_status (appindicator.STATUS_ACTIVE)
-# ind.set_passive_icon("inactcli-passive")
-ind.set_attention_icon ("inactcli-attention")
+ind.set_attention_icon ("inactcli-passive")
 # create a menu
 menu = gtk.Menu()
 
