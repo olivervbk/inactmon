@@ -39,6 +39,7 @@ class sockServer(threading.Thread):
 
 		def run(self):
 			print "clientsHandler:loop"
+			deadClients = []
 			while True:
 				message = self.queue.get()
 				print "clientsHander: got message"
@@ -51,8 +52,12 @@ class sockServer(threading.Thread):
 						break
 					except:
 						print "client died?:"+str(sys.exc_info()[0])
-						self.clients.remove(client)
+						deadClients.append(client)
 				self.queue.task_done()
+			
+				for client in deadClients:
+					self.clients.remove(client)
+
 		def append(self, connection):
 			self.clients.append(connection)
 
