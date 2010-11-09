@@ -3,6 +3,7 @@
 import sys
 import signal
 import os, os.path
+import stat
 import argparse
 
 import time
@@ -19,72 +20,75 @@ import impacket
 from impacket import ImpactDecoder
 
 DEFAULT_MAX_CLIENTS = 5
-DEFAULT_PORT = 9123
-DEFAULT_BIND_ADDRESS = '0.0.0.0'
+DEFAULT_SOCKET_FILE = '/tmp/inactmon.sock'
 
-class myQueue:
-	maxclients = 0
-	queue = []
-	available = []
+class sockServer(threading.Thread):
+	sockFile = None
+	maxClients = None
+	sock = None
+	cliHandler = None
 
-	def __init__(self,maxclients, maxsizes):
-		self.maxclients = maxclients
-		for i in range(0, maxclients):
-			self.queue.insert(i, Queue.Queue(maxsizes))
-			self.available.append(i)
+	class clientsHandler(threading.Thread):
+		queue = None
+		clients = []
 
-	def init(self):
-		if len(self.available) == 0:
-			return False
-		return self.available.pop()
-		
-	def release(self,index):
-		self.available.append(index)
+		def __init__(self, queue):
+			self.queue = queue
+			threading.Thread.__init__(self)
+			print "clientsHandler:init:done"
 
-	def add(self,message):
-		for i in range(0,self.maxclients):
-			self.queue[i].put_nowait(message)
-		
-	def get(self,index):
-		return self.queue[index].get()
+		def run(self):
+			print "clientsHandler:loop"
+			while True:
+				message = self.queue.get()
+				print "clientsHander: got message"
+				for client in self.clients:
+					try:
+						client.send(message+"\n")
+						print "Sent message"
+					except KeyboardInterrupt:
+						print "killed..."
+						break
+					except:
+						print "client died?:"+str(sys.exc_info()[0])
+						self.clients.remove(client)
+				self.queue.task_done()
+		def append(self, connection):
+			self.clients.append(connection)
 
-class ThreadedTCPServer(SocketServer.ThreadingMixIn, SocketServer.TCPServer):
-	pass
+	def __init__(self, sockFile, maxClients, queue):
+		self.sockFile = sockFile
+		self.maxClients = int(maxClients)
 
-class MyTCPHandler(SocketServer.BaseRequestHandler):
-	def handle(self):
-# !!! myqueue should not be global -> __init__(self,myqueue): +SocketServer.__init__ ? =/
-		global myqueue
-		index = myqueue.init()
-		if index == False:
-			self.request.send("clients exceed max")
-			return
+		threading.Thread.__init__(self)
 
+		self.cliHandler = self.clientsHandler(queue)
+		self.cliHandler.start()
+
+	def run(self):
+		self.sock = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+		try:
+		    os.remove(self.sockFile)
+		except OSError:
+		    pass
+		except:
+			print "os.remove exception:"+sys.exc_info()[0]
+
+		self.sock.bind(self.sockFile)
+		os.chmod(self.sockFile, stat.S_IRWXU | stat.S_IRWXG | stat.S_IRWXO)
+
+		self.sock.listen(self.maxClients)
 		while True:
-			message = myqueue.get(index)
-			try:
-				self.request.send(message+"\n")
-				print "Sent message"
-			except:
-				print "Client died..."
-				break
-		myqueue.release(index)
-
-# !!! change to class threading ? =/
-def tcpServer(host, port, max_clients):
-	debug("tcpServer:start")
-	server = None
-	try:
-		server = ThreadedTCPServer( (str(host),int(port)), MyTCPHandler)
-	except:
-		print "tcpServer could not start:",sys.exc_info()[0]
-
-	if server is None:
-		print "server is none"
-		sys.exit(666)
-	server.serve_forever()
-	debug("tcpServer:stop")
-
+			# get queue
+			#try:
+			connection, address = self.sock.accept()
+			self.cliHandler.append(connection)
+			#except:
+			#	print "socket loop exception:"+str(sys.exc_info()[0])
+			#	break
+		self.sock.close()
+		exit_gracefully()
+			
 class netMon(threading.Thread):
 	class netMonMessenger:
 		def __init__(self):
@@ -141,7 +145,7 @@ class netMon(threading.Thread):
 			
 			
 
-			message = 'tcp:'+srcAddr+':'+srcPort+':'+dstAddr+':'+dstPort+':'+seq+':'+status
+			message = 'tcp:'+status+':'+srcAddr+':'+srcPort+':'+dstAddr+':'+dstPort
 
 			return message
 
@@ -160,14 +164,14 @@ class netMon(threading.Thread):
 	args = None
 	ipAddresses = None
 
-	def __init__(self,args,ipAddresses):
+	def __init__(self,args,ipAddresses,myqueue):
 		self.args = args
 		self.ipAddresses = ipAddresses
+		self.myqueue = myqueue
 		threading.Thread.__init__(self)
 		debug("netMon:init")
 
 	def run(self):
-		global myqueue
 		debug("netMon:run")
 		messenger = self.netMonMessenger()
 
@@ -185,9 +189,9 @@ class netMon(threading.Thread):
 	# !!!
 		print "%s: net=%s, mask=%s, addrs=%s" % (self.args.interface, cap.getnet(), cap.getmask(), str(self.ipAddresses))
 
-		debug('NOT Setting filter')
+		debug('Setting filter')
 	# !!! improve filter
-		# cap.setfilter('tcp[13] = 2')
+		cap.setfilter('tcp[13] = 2')
 
 		debug('Waiting for packet...')
 		while True:
@@ -199,7 +203,7 @@ class netMon(threading.Thread):
 			message = messenger.parse(payload)
 			debug(message)
 			# queueMessages.put(message)
-			myqueue.add(message)
+			self.myqueue.put(message)
 
 		debug("netMon:stop")
 
@@ -279,21 +283,21 @@ parser.add_argument('-s','--promiscuous',
 	action='store_true',
 	help='Set the capture interface to promiscuous. Might be needed by some options.')
 
-parser.add_argument('-b','--bind', 
-	dest='bind', 
+parser.add_argument('-f','--socketFile', 
+	dest='socketFile', 
 	required=False, 
-	metavar='address', 
-	default=DEFAULT_BIND_ADDRESS,
-	help='Ip to listen for clients(default is '+str(DEFAULT_BIND_ADDRESS)+').')
+	metavar='file', 
+	default=DEFAULT_SOCKET_FILE,
+	help='File to listen for clients(default is '+str(DEFAULT_SOCKET_FILE)+').')
 
 # IMPLEMENT!
 # !!! implement file
-parser.add_argument('-p', '--port',
-	dest='port',
-	required=False,
-	metavar='port',
-	default=DEFAULT_PORT,
-	help='Port to listen for clients. If a file is specified will create socket at file(default is '+str(DEFAULT_PORT)+').')
+# parser.add_argument('-p', '--port',
+#	dest='port',
+#	required=False,
+#	metavar='port',
+#	default=DEFAULT_PORT,
+#	help='Port to listen for clients. If a file is specified will create socket at file(default is '+str(DEFAULT_PORT)+').')
 
 parser.add_argument('-c','--conf', 
 	required=False, 
@@ -314,8 +318,9 @@ parser.add_argument('-l','--log',
 # IMPLEMENT
 parser.add_argument('-m','--max-clients', 
 	required=False, 
-	dest='maxclients', 
+	dest='maxClients', 
 	metavar='clients',
+	default=DEFAULT_MAX_CLIENTS,
 	help='Number of allowed clients(default is '+str(DEFAULT_MAX_CLIENTS)+').')
 
 parser.add_argument('-v','--verbose', 
@@ -345,19 +350,19 @@ parser.add_argument('-q','--quiet',
 args = parser.parse_args()
 verbose = args.verbose
 
-myqueue = myQueue(DEFAULT_MAX_CLIENTS, 0)
+myqueue = Queue.Queue()
 
 debug('Checking interface '+str(args.interface))
 ipAddresses = checkInterface(args.interface)
 
-debug('Starting tcpServer thread')
-tcpServer_thread = threading.Thread(target=tcpServer, args=(args.bind,int(args.port), args.maxclients))
-tcpServer_thread.setDaemon(True)
-tcpServer_thread.start()
+debug('Starting sockServer thread')
+sockServer_thread = sockServer(args.socketFile, args.maxClients, myqueue)
+sockServer_thread.setDaemon(True)
+sockServer_thread.start()
 
 
 debug('Starting netMon thread')
-netMon_thread = netMon(args, ipAddresses)
+netMon_thread = netMon(args, ipAddresses, myqueue)
 netMon_thread.setDaemon(True)
 netMon_thread.start()
 

@@ -17,8 +17,7 @@ import gobject
 import gtk
 import appindicator
 
-DEFAULT_PORT = 9123
-DEFAULT_SERVER = 'localhost'
+DEFAULT_SOCKET_FILE = '/tmp/inactmon.sock'
 
 def exit_gracefully():
 	print "exiting gracefully..."
@@ -29,16 +28,38 @@ class notificationManager(threading.Thread):
 	server = ''
 	port = ''
 
+	def messageParser(self,message):
+		output = None
+		messages = message.split('\n')
+		for m in messages:
+			fields = m.split(':')
+			auxout = 'empty'
+
+			if fields[0] == 'tcp':
+				if fields[1] == 'syn':
+					auxout = 'New connection from '+fields[2]+':'+fields[3]+' on port '+fields[5]
+
+			if fields[0] == 'err':
+				auxout = 'Error: '+fields[1]
+
+			if output is not None:
+				output += '\n'
+			else:
+				output = ''
+			output += auxout
+				
+		return output
+		
+
 	def debug(self,message, level):
 		classname = self.__name__
 		caller = '('+classname+')'+inspect.stack()[1][3]
 		debug(caller, message,level)
 
-	def __init__(self, server, port):
+	def __init__(self, socketFile):
 		gtk.gdk.threads_init() # this makes gtk to allow threads =/
 		self.debug("init", "info")
-		self.server = server
-		self.port = port
+		self.socketFile = socketFile
 		threading.Thread.__init__(self)
 		self.debug("init done","info")
 
@@ -49,34 +70,22 @@ class notificationManager(threading.Thread):
 			exit_gracefully()
 		self.debug("Pynotify init successful", "info")
 	
-		sock = None
-		for res in socket.getaddrinfo(self.server, int(self.port), socket.AF_UNSPEC, socket.SOCK_STREAM):
-			af, socktype, proto, canonname, sa = res
-		    	try:
-			        sock = socket.socket(af, socktype, proto)
-			except socket.error, msg:
-				sock = None
-				continue
-			try:
-				sock.connect(sa)
-			except socket.error, msg:
-				sock.close()
-				sock = None
-				continue
-			break
-		if sock is None:
-			self.debug("Could not open socket. Retrying...", "warn")
-			# wait 
-			# retry
-			self.run()
-	
+
+		sock = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+		sock.connect(self.socketFile)
+
 		self.debug("Connected to server", "info")
 		while True:
+			message = sock.recv(1024)
+			
+			if not message:
+				print "...connection closed"
+				break
+			message = str(message)
+			message = message[:-1] # remove trailing newlines
+			print "Message recv:"+message
+			self.messageParser(message)
 			try:
-				message = str(sock.recv(1024))
-				message = message[:-1] # remove trailing newlines
-
-				print "Message recv:"+message
 
 				notification = pynotify.Notification(
 					"Inactcli",
@@ -84,7 +93,7 @@ class notificationManager(threading.Thread):
 					"notification-message-email")
 				notification.set_urgency(pynotify.URGENCY_NORMAL)
 				notification.set_hint_string("x-canonical-append","")
-#				notification.attach_to_widget(self)
+	#				notification.attach_to_widget(self)
 				if not notification.show():
 					print "Unable to show notification"
 			except KeyboardInterrupt:
@@ -95,8 +104,6 @@ class notificationManager(threading.Thread):
 
 			except:
 				print "notMan:Terminated! Error:",sys.exc_info()[0]
-				sock.close()
-				exit_gracefully()
 				break
 		sock.close()
 		exit_gracefully()
@@ -131,19 +138,19 @@ def debug(caller,message,level):
 
 
 parser = argparse.ArgumentParser(description='Incoming Netword Activity Client.')
-parser.add_argument('-p', '--port',
-	dest='port',
-	required=False,
-	metavar='port',
-	default=DEFAULT_PORT,
-	help='Port to connect on server. If a file is specified will create socket at file.')
+# parser.add_argument('-p', '--port',
+#	dest='port',
+#	required=False,
+#	metavar='port',
+#	default=DEFAULT_PORT,
+#	help='Port to connect on server. If a file is specified will create socket at file.')
 
-parser.add_argument('-s', '--server',
-	dest='server',
+parser.add_argument('-f', '--socketFile',
+	dest='socketFile',
 	required=False,
-	metavar='server',
-	default=DEFAULT_SERVER,
-	help='Server host')
+	metavar='file',
+	default=DEFAULT_SOCKET_FILE,
+	help='Socket File')
 
 parser.add_argument('-v','--verbose', 
 	required=False, 
@@ -171,7 +178,7 @@ verbose = args.verbose
 # notMan = notificationManager(args.server, args.port)
 
 debug("main","Threading notificationManager","info")
-notMan = notificationManager( args.server, args.port)
+notMan = notificationManager( args.socketFile)
 notMan.setDaemon(True)
 notMan.start()
 
@@ -180,7 +187,7 @@ ind = appindicator.Indicator ("inactcli",
 	appindicator.CATEGORY_APPLICATION_STATUS)
 ind.set_status (appindicator.STATUS_ACTIVE)
 # ind.set_passive_icon("inactcli-passive")
-ind.set_attention_icon ("inactcli-passive")
+ind.set_attention_icon ("inactcli-attention")
 # create a menu
 menu = gtk.Menu()
 
