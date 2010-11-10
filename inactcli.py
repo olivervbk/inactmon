@@ -37,7 +37,7 @@
 
 				if fields[0] == 'tcp':
 					if fields[1] == 'syn':
-						auxout = 'New connection from '+fields[2]+':'+fields[3]+' on port '+fields[5]
+						auxout = 'Connection from '+fields[2]+':'+fields[3]+' on port '+fields[5]
 
 				if fields[0] == 'err':
 					auxout = 'Error: '+fields[1]

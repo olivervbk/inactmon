@@ -5,11 +5,11 @@ import signal
 import os, os.path
 import stat
 import argparse
+import logging
 
 import time
 import datetime
 
-import SocketServer
 import socket
 import threading
 import Queue
@@ -19,56 +19,75 @@ import pcapy
 import impacket
 from impacket import ImpactDecoder
 
+# --- Default Values ---
 DEFAULT_MAX_CLIENTS = 5
 DEFAULT_SOCKET_FILE = '/tmp/inactmon.sock'
+DEFAULT_VERBOSE_LEVEL = 'warn'
+
+# --- Classes ---
+# NullHandler: used to make loggers not output(quiet)
+class NullHandler(logging.Handler):
+    def emit(self, record):
+        pass
 
 class sockServer(threading.Thread):
+	class clientsHandler(threading.Thread):
+		queue = None
+		clients = []
+		logger = None
+
+		def __init__(self, queue):
+			self.queue = queue
+			self.logger = logging.getLogger('console.sockServer.clientsHandler')
+			threading.Thread.__init__(self)
+			self.logger.debug("init:done")
+
+		def run(self):
+			self.logger.debug( "loop")
+			deadClients = []
+			while True:
+				message = self.queue.get()
+				self.logger.debug("got message")
+				for client in self.clients:
+					try:
+						client.send(message+"\n")
+						self.logger.debug("Sent message to client")
+					except KeyboardInterrupt:
+						self.logger.info("killed...")
+						return
+					except:
+						self.logger.info( "client died?:"+str(sys.exc_info()[0]))
+						deadClients.append(client)
+				self.queue.task_done()
+			
+				self.logger.debug("removing dead clients...")
+				for client in deadClients:
+					self.clients.remove(client)
+
+				#clear deadClients again
+				deadClients = []
+
+		def append(self, connection):
+			self.logger.debug("appended connection")
+			self.clients.append(connection)
+
 	sockFile = None
 	maxClients = None
 	sock = None
 	cliHandler = None
-
-	class clientsHandler(threading.Thread):
-		queue = None
-		clients = []
-
-		def __init__(self, queue):
-			self.queue = queue
-			threading.Thread.__init__(self)
-			print "clientsHandler:init:done"
-
-		def run(self):
-			print "clientsHandler:loop"
-			deadClients = []
-			while True:
-				message = self.queue.get()
-				print "clientsHander: got message"
-				for client in self.clients:
-					try:
-						client.send(message+"\n")
-						print "Sent message"
-					except KeyboardInterrupt:
-						print "killed..."
-						break
-					except:
-						print "client died?:"+str(sys.exc_info()[0])
-						deadClients.append(client)
-				self.queue.task_done()
-			
-				for client in deadClients:
-					self.clients.remove(client)
-
-		def append(self, connection):
-			self.clients.append(connection)
+	logger = None
 
 	def __init__(self, sockFile, maxClients, queue):
 		self.sockFile = sockFile
 		self.maxClients = int(maxClients)
 
+		self.logger = logging.getLogger('sockServer')
 		threading.Thread.__init__(self)
 
 		self.cliHandler = self.clientsHandler(queue)
 		self.cliHandler.start()
+		self.logger.debug("init:done")
+
 
 	def run(self):
 		self.sock = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
@@ -78,10 +97,12 @@ class sockServer(threading.Thread):
 		    pass
 		except:
 			print "os.remove exception:"+sys.exc_info()[0]
+			exit_gracefully()
 
 		self.sock.bind(self.sockFile)
 		os.chmod(self.sockFile, stat.S_IRWXU | stat.S_IRWXG | stat.S_IRWXO)
 
+		self.logger.info("Listening for connections...")
 		self.sock.listen(self.maxClients)
 		while True:
 			# get queue
@@ -92,12 +113,15 @@ class sockServer(threading.Thread):
 			#	print "socket loop exception:"+str(sys.exc_info()[0])
 			#	break
 		self.sock.close()
+		self.logger.warn("exiting gracefully")
 		exit_gracefully()
 			
 class netMon(threading.Thread):
 	class netMonMessenger:
+		logger = None
 		def __init__(self):
-			debug("netMonMessenger:nothing to do")
+			self.logger = logging.getLogger('console.netMon.netMonMessenger')
+			self.logger.debug("nothing to do")
 		
 		def parse(self,payload):
 			rip = ImpactDecoder.EthDecoder().decode(payload)
@@ -110,16 +134,16 @@ class netMon(threading.Thread):
 				pass
 
 			if proto == 6:
-				debug('netMonMessenger:parse:is tcp!')
+				self.logger.debug('parse:is tcp!')
 				return self.tcpParser(rip)
 			if proto == 17:
-				debug('netMonMessenger:parse:is UDP!')
+				self.logger.debug('parse:is UDP!')
 				return self.udpParser(rip)
 			if proto == 1:
-				debug('netMonMessenger:parse:is ICMP')
+				self.logger.debug('parse:is ICMP')
 				return 'icmp: not implemented'
-			debug('netMonMessenger:parse:unknown ether type:'+str(rip.get_ether_type())+' with proto:'+str(proto))
-			debug(rip)
+			self.logger.debug('parse:unknown ether type:'+str(rip.get_ether_type())+' with proto:'+str(proto))
+			self.logger.debug(rip)
 			return self.message('error','proto not found')
 
 		def message(self,status, message):
@@ -168,16 +192,18 @@ class netMon(threading.Thread):
 			return message
 	args = None
 	ipAddresses = None
+	logger = None
 
 	def __init__(self,args,ipAddresses,myqueue):
 		self.args = args
 		self.ipAddresses = ipAddresses
 		self.myqueue = myqueue
+		self.logger = logging.getLogger('console.netMon')
 		threading.Thread.__init__(self)
-		debug("netMon:init")
+		self.logger.debug("init:done")
 
 	def run(self):
-		debug("netMon:run")
+		self.logger.debug("run")
 		messenger = self.netMonMessenger()
 
 		# Arguments here are:
@@ -189,53 +215,29 @@ class netMon(threading.Thread):
 		cap = pcapy.open_live(self.args.interface, 1500, 0, 0)
 		if pcapy.DLT_EN10MB != cap.datalink():
 			print "Interface is not ethernet based. Quitting..."
+			exit_gracefully()
 			return; # this should exit the thread..?
 
 	# !!!
 		print "%s: net=%s, mask=%s, addrs=%s" % (self.args.interface, cap.getnet(), cap.getmask(), str(self.ipAddresses))
 
-		debug('Setting filter')
-	# !!! improve filter
+		self.logger.debug('Setting filter')
+	# !!! improve filter -> use engines! :D
 		cap.setfilter('tcp[13] = 2')
 
-		debug('Waiting for packet...')
+		self.logger.info('Waiting for packet...')
 		while True:
 			try:
 				(header, payload) = cap.next()
 			except:
 				print "cap.next() exception:"+sys.exc_info()[0]
+				exit_gracefully()
 
 			message = messenger.parse(payload)
-			debug(message)
-			# queueMessages.put(message)
+			self.logger.debug("msg rcvd: "+str(message))
 			self.myqueue.put(message)
 
-		debug("netMon:stop")
-
-
-def signal_handler(signal_recv, frame):
-	if signal_recv == signal.SIGINT:
-		exit_gracefully()
-
-	if signal_recv == signal.SIGHUP:
-		reload_config()
-
-def exit_gracefully():
-	print "\nexiting..."
-# !!! this is not very graceful =/
-	sys.exit(0)
-
-def reload_config():
-	print "\nreload config"
-
-def log(message):
-	debug("LOG:"+str(message))
-	# print "LOG:"+str(message)
-
-def debug(message):
-	global args
-	if args.verbose:
-		print 'DEBUG:'+str(message)
+		self.logger.info("stopping...")
 
 def checkInterface(iface):
 	ipAddresses = [] 
@@ -269,7 +271,22 @@ def checkInterface(iface):
 				sys.exit(1)
 	return ipAddresses
 
+def signal_handler(signal_recv, frame):
+	if signal_recv == signal.SIGINT:
+		exit_gracefully()
 
+	if signal_recv == signal.SIGHUP:
+		reload_config()
+
+def exit_gracefully():
+	print "\nexiting..."
+	logging.shutdown()
+	print "should exit now =/"
+# !!! this is not very graceful =/
+	sys.exit(0)
+
+def reload_config():
+	print "\nreload config"
 	
 signal.signal(signal.SIGINT, signal_handler)
 signal.signal(signal.SIGHUP, signal_handler)
@@ -316,7 +333,7 @@ parser.add_argument('-c','--conf',
 parser.add_argument('-l','--log', 
 	required=False, 
 	dest='log',
-	type=file, 
+	type=str, 
 	metavar='log-file',
 	help='File to log to.')
 
@@ -330,9 +347,10 @@ parser.add_argument('-m','--max-clients',
 
 parser.add_argument('-v','--verbose', 
 	required=False, 
-	dest='verbose', 
-	action='store_true', 
-	help='More output.')
+	dest='verbose',  
+	type=str,
+	default=DEFAULT_VERBOSE_LEVEL,
+	help='More output(debug|info|warn|error|critical) Warn is default.')
 
 # IMPLEMENT: do not go to background ?
 parser.add_argument('-d','--debug', 
@@ -344,34 +362,70 @@ parser.add_argument('-d','--debug',
 # IMPLEMENT
 parser.add_argument('-q','--quiet', 
 	required=False, 
-	dest='verbose', 
-	action='store_false', 
-	help='Show less output(default)', 
-	default=True)
+	dest='quiet', 
+	action='store_true', 
+	help='Show no output(overrides verbosity).', 
+	default=False)
 
 
+LEVELS = {'debug': logging.DEBUG,
+          'info': logging.INFO,
+          'warning': logging.WARNING,
+          'error': logging.ERROR,
+          'critical': logging.CRITICAL}
 
-
+#parse args
 args = parser.parse_args()
-verbose = args.verbose
 
+#start queue
 myqueue = Queue.Queue()
 
-debug('Checking interface '+str(args.interface))
+#start loggers
+log = logging.getLogger('log')
+
+if args.log:
+	print "File logging not implemented yet"
+	sys.exit(0)
+
+console = logging.getLogger('console')
+# get verbose level
+try:
+	level = LEVELS[args.verbose]
+	console.setLevel(level)
+except KeyError:
+	print "Verbose option '"+args.verbose+"' invalid."
+	sys.exit(0)
+
+#set handler and formatter
+if not args.quiet:
+	sh = logging.StreamHandler()
+	sf = logging.Formatter("%(name)s - %(levelname)s - %(message)s")
+	sh.setFormatter(sf)
+	console.addHandler(sh)
+else:
+	nh = NullHandler()
+	console.addHandler(nh)
+
+console.debug('Checking interface '+str(args.interface))
 ipAddresses = checkInterface(args.interface)
 
-debug('Starting sockServer thread')
+console.debug('Starting sockServer thread')
 sockServer_thread = sockServer(args.socketFile, args.maxClients, myqueue)
 sockServer_thread.setDaemon(True)
 sockServer_thread.start()
 
 
-debug('Starting netMon thread')
+console.debug('Starting netMon thread')
 netMon_thread = netMon(args, ipAddresses, myqueue)
 netMon_thread.setDaemon(True)
 netMon_thread.start()
 
 #!! does nothing, could have been a thread..
 while True:
-	time.sleep(10)
-	print '.' 
+	try:
+		time.sleep(10)
+		print '.' 
+	except:
+		print "except ocurred on main"
+		break
+exit_gracefully()
