@@ -23,7 +23,7 @@ from impacket import ImpactDecoder
 
 #TODO:implement filter system->name-rules (iface! sets the incoming dst ip :D )
 
-#FIXME:does not exit gracefully
+#FIXME:do daemonic threads damage non-renewable system resources?(inet sockets?)(pcap resources?)
 
 # --- Default Values ---
 DEFAULT_MAX_CLIENTS = 5
@@ -95,7 +95,9 @@ class sockServer(threading.Thread):
 
 		self.logger = logging.getLogger('console.sockServer')
 
+		# run clienthandler thread
 		self.cliHandler = self.clientsHandler(queue)
+		self.cliHandler.setDaemon(True)
 		self.cliHandler.start()
 
 		threading.Thread.__init__(self)
@@ -121,12 +123,13 @@ class sockServer(threading.Thread):
 		self.sock.listen(self.maxClients)
 		while True:
 			# get queue
-			#try:
-			connection, address = self.sock.accept()
-			self.cliHandler.append(connection)
-			#except:
-			#	print "socket loop exception:"+str(sys.exc_info()[0])
-			#	break
+			try:
+#this may block
+				connection, address = self.sock.accept()
+				self.cliHandler.append(connection)
+			except:
+				print "socket loop exception:"+str(sys.exc_info()[0])
+				break
 		self.sock.close()
 		self.logger.warn("exiting gracefully")
 		exit_gracefully()
@@ -261,6 +264,7 @@ class netMon:
 			self.logger.info('Waiting for packet...')
 			while True:
 				try:
+#this may block
 					(header, payload) = cap.next()
 				except:
 					print "cap.next() exception:"+str(sys.exc_info()[0])
@@ -311,7 +315,7 @@ class netMon:
 		self.logger.debug("starting filter engines")
 		for oneFilter in filters:
 			filter_thread = self.netMonFilter(args, ipAddresses, myqueue, messenger, oneFilter[0], oneFilter[1])	
-			# filter_thread.setDaemon(True)
+			filter_thread.setDaemon(True)
 			filter_thread.start()
 
 		self.logger.debug("done creating engines")
@@ -357,10 +361,19 @@ def signal_handler(signal_recv, frame):
 		reload_config()
 
 def exit_gracefully():
+#FIXME:remove these prints
 	print "\nexiting..."
 	logging.shutdown()
 	print "exit_gracefully is done!"
-# !!! this is not very graceful =/ maybe raise signal to all threads?
+
+#FIXME:socket.accept and pcapy.next are blocking... AND signals are only treated in the main thread... cu
+#	this could lead to problems when dealing with non reusable system resources(like inet sockets =/)
+
+#	signal.alarm() # does nothing =/ must implement with alarm.pause? but socket.accept is blocking...
+#	os.kill(os.getpid(), signal.SIGKILL) # kills all threads
+#	os.kill(os.getpid(), signal.SIGTERM) # terminates all threads
+#	os._exit(0) # kills all threads
+#	sys.exit(0) # does only exit current thread(main)
 	sys.exit(0)
 
 def reload_config():
@@ -505,6 +518,7 @@ ipAddresses = checkInterface(args.interface)
 #start threads
 console.debug('Starting sockServer thread')
 sockServer_thread = sockServer(args.socketFile, args.maxClients, myqueue)
+sockServer_thread.setDaemon(True)
 sockServer_thread.start()
 
 console.debug('Starting netMon')
@@ -515,7 +529,10 @@ while 1:
 	try:
 		time.sleep(50)
 		print "."
+	except SystemExit:
+		break
 	except:
 		print "Main (useless) loop end:"+str(sys.exc_info()[0])
 		break
+console.debug('Main Thread ended.')
 sys.exit(0)
