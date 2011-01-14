@@ -19,6 +19,11 @@ import pcapy
 import impacket
 from impacket import ImpactDecoder
 
+#TODO:choose whether to go to background or not
+#TODO:implement filter system->name-rules (iface? =/)
+
+#FIXME:does not exit gracefully
+
 # --- Default Values ---
 DEFAULT_MAX_CLIENTS = 5
 DEFAULT_SOCKET_FILE = '/tmp/inactmon.sock'
@@ -46,7 +51,12 @@ class sockServer(threading.Thread):
 			self.logger.debug( "loop")
 			deadClients = []
 			while True:
-				message = self.queue.get()
+				try:
+					message = self.queue.get()
+				except KeyboardInterrupt:
+					self.logger.info("killed..")
+					return
+
 				self.logger.debug("got message")
 				for client in self.clients:
 					try:
@@ -81,12 +91,15 @@ class sockServer(threading.Thread):
 		self.sockFile = sockFile
 		self.maxClients = int(maxClients)
 
-		self.logger = logging.getLogger('sockServer')
-		threading.Thread.__init__(self)
+		self.logger = logging.getLogger('console.sockServer')
 
 		self.cliHandler = self.clientsHandler(queue)
 		self.cliHandler.start()
+
+		threading.Thread.__init__(self)
+
 		self.logger.debug("init:done")
+		#self.run() DO NOT
 
 
 	def run(self):
@@ -116,23 +129,26 @@ class sockServer(threading.Thread):
 		self.logger.warn("exiting gracefully")
 		exit_gracefully()
 			
-class netMon(threading.Thread):
+class netMon:
 	class netMonMessenger:
 		logger = None
 		def __init__(self):
 			self.logger = logging.getLogger('console.netMon.netMonMessenger')
-			self.logger.debug("nothing to do")
+			self.logger.debug("init")
 		
-		def parse(self,payload):
+		def parse(self,payload,name):
+			self.logger.debug("got payload from "+name)
 			rip = ImpactDecoder.EthDecoder().decode(payload)
-			
+
 			print rip
-			proto = -1
+	
+			proto = -1			
 			try:
 				proto = rip.child().get_ip_p()
 			except AttributeError:
 				pass
 
+			#FIXME:add proto constant names instead of numbers =/
 			if proto == 6:
 				self.logger.debug('parse:is tcp!')
 				return self.tcpParser(rip)
@@ -141,7 +157,8 @@ class netMon(threading.Thread):
 				return self.udpParser(rip)
 			if proto == 1:
 				self.logger.debug('parse:is ICMP')
-				return 'icmp: not implemented'
+				return self.icmpParser(rip)
+
 			self.logger.debug('parse:unknown ether type:'+str(rip.get_ether_type())+' with proto:'+str(proto))
 			self.logger.debug(rip)
 			return self.message('error','proto not found')
@@ -152,6 +169,21 @@ class netMon(threading.Thread):
 			if status is 'info':
 				return "info:"+str(message)
 			return "meh"
+
+		def icmpParser(self, rip):
+			status = 'unknown'
+			#FIXME:should get only req
+
+			dstAddr = rip.child().get_ip_dst()
+			srcAddr = rip.child().get_ip_src()
+			icmpType = rip.child().child().get_icmp_type()
+
+			if(icmpType == rip.child().child().ICMP_ECHO):
+				status = 'echo'
+			if(icmpType == rip.child().child().ICMP_ECHOREPLY):
+				status = 'reply'
+
+			return 'icmp:'+srcAddr+':'+dstAddr+':'+status
 
 		def tcpParser(self, rip):
 			status = 'unknown'
@@ -190,17 +222,66 @@ class netMon(threading.Thread):
 			message = 'udp:'+srcAddr+':'+srcPort+':'+dstAddr+':'+dstPort
 
 			return message
+
+	class netMonFilter(threading.Thread):
+		args = None
+		ipAddresses = None
+		myqueue = None
+		messenger = None
+		logger = None
+		name = None
+		rule = None
+
+		def __init__(self,args,ipAddresses,myqueue,messenger,name,rule):
+			#FIXME: args really needed ? =/
+			self.args = args
+			self.ipAddresses = ipAddresses
+			self.myqueue = myqueue
+			self.messenger = messenger
+			self.name = name
+			self.rule = rule
+			self.logger = logging.getLogger('console.netMon.'+self.name)
+			threading.Thread.__init__(self)
+			self.logger.debug("init:done")
+
+		def run(self):
+			self.logger.debug("run")
+
+			cap = pcapy.open_live(self.args.interface, 1500, 0, 0)
+			
+			self.logger.debug('Setting filter')
+			try:
+				cap.setfilter(self.rule)
+			except:
+				print "Unable to set rule '"+self.rule+"' for filter '"+self.name+"'"
+				exit_gracefully()
+
+			self.logger.info('Waiting for packet...')
+			while True:
+				try:
+					(header, payload) = cap.next()
+				except:
+					print "cap.next() exception:"+str(sys.exc_info()[0])
+					exit_gracefully()
+
+				message = self.messenger.parse(payload, self.name)
+				self.logger.debug("msg rcvd: "+str(message))
+				self.myqueue.put(message)
+
+			self.logger.info("stopping...")
+
 	args = None
 	ipAddresses = None
 	logger = None
 
-	def __init__(self,args,ipAddresses,myqueue):
+	def __init__(self,args,ipAddresses,myqueue,filters):
 		self.args = args
 		self.ipAddresses = ipAddresses
 		self.myqueue = myqueue
 		self.logger = logging.getLogger('console.netMon')
-		threading.Thread.__init__(self)
+		#threading.Thread.__init__(self)
 		self.logger.debug("init:done")
+		self.run()
 
 	def run(self):
 		self.logger.debug("run")
@@ -212,32 +293,27 @@ class netMon(threading.Thread):
 		#   promiscious mode (1 for true)
 		#   timeout (in milliseconds)
 	
+		self.logger.debug("testing interface(s?)")
 		cap = pcapy.open_live(self.args.interface, 1500, 0, 0)
+
+		#2DO:this test should only be made once!
 		if pcapy.DLT_EN10MB != cap.datalink():
 			print "Interface is not ethernet based. Quitting..."
 			exit_gracefully()
 			return; # this should exit the thread..?
+		#remove cap after test ? =/
 
-	# !!!
+		# FIXME:remove this line?
 		print "%s: net=%s, mask=%s, addrs=%s" % (self.args.interface, cap.getnet(), cap.getmask(), str(self.ipAddresses))
 
-		self.logger.debug('Setting filter')
-	# !!! improve filter -> use engines! :D
-		cap.setfilter('tcp[13] = 2')
+		self.logger.debug("starting filter engines")
+		for oneFilter in filters:
+			filter_thread = self.netMonFilter(args, ipAddresses, myqueue, messenger, oneFilter[0], oneFilter[1])	
+			# filter_thread.setDaemon(True)
+			filter_thread.start()
 
-		self.logger.info('Waiting for packet...')
-		while True:
-			try:
-				(header, payload) = cap.next()
-			except:
-				print "cap.next() exception:"+sys.exc_info()[0]
-				exit_gracefully()
-
-			message = messenger.parse(payload)
-			self.logger.debug("msg rcvd: "+str(message))
-			self.myqueue.put(message)
-
-		self.logger.info("stopping...")
+		self.logger.debug("done creating engines")
+		
 
 def checkInterface(iface):
 	ipAddresses = [] 
@@ -324,8 +400,9 @@ parser.add_argument('-f','--socketFile',
 parser.add_argument('-c','--conf', 
 	required=False, 
 	dest='config',
-	type=file, 
+	type=str, 
 	metavar='config-file',
+	default=None,
 	help='File holding the configuration.')
 
 # IMPLEMENT!
@@ -370,7 +447,7 @@ parser.add_argument('-q','--quiet',
 
 LEVELS = {'debug': logging.DEBUG,
           'info': logging.INFO,
-          'warning': logging.WARNING,
+          'warn': logging.WARNING,
           'error': logging.ERROR,
           'critical': logging.CRITICAL}
 
@@ -379,6 +456,10 @@ args = parser.parse_args()
 
 #start queue
 myqueue = Queue.Queue()
+
+if args.config is not None:
+	print "Config load is not implemented yet"
+	sys.exit(0)
 
 #start loggers
 log = logging.getLogger('log')
@@ -411,21 +492,13 @@ ipAddresses = checkInterface(args.interface)
 
 console.debug('Starting sockServer thread')
 sockServer_thread = sockServer(args.socketFile, args.maxClients, myqueue)
-sockServer_thread.setDaemon(True)
 sockServer_thread.start()
 
+console.debug('Starting netMon')
+filters = [['tcpSyn-test','tcp[13] = 2'], ['udp-test', 'udp port 53'], ['icmp-test','icmp']]
+netMon(args, ipAddresses, myqueue,filters)
 
-console.debug('Starting netMon thread')
-netMon_thread = netMon(args, ipAddresses, myqueue)
-netMon_thread.setDaemon(True)
-netMon_thread.start()
-
-#!! does nothing, could have been a thread..
-while True:
-	try:
-		time.sleep(10)
-		print '.' 
-	except:
-		print "except ocurred on main"
-		break
+while 1:
+	time.sleep(50)
+	print "."
 exit_gracefully()
