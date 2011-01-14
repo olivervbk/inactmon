@@ -19,8 +19,9 @@ import pcapy
 import impacket
 from impacket import ImpactDecoder
 
-#TODO:choose whether to go to background or not
-#TODO:implement filter system->name-rules (iface? =/)
+#TODO:ready a release! =/ and update website
+
+#TODO:implement filter system->name-rules (iface! sets the incoming dst ip :D )
 
 #FIXME:does not exit gracefully
 
@@ -28,6 +29,7 @@ from impacket import ImpactDecoder
 DEFAULT_MAX_CLIENTS = 5
 DEFAULT_SOCKET_FILE = '/tmp/inactmon.sock'
 DEFAULT_VERBOSE_LEVEL = 'warn'
+DEFAULT_DEBUG_LEVEL = False
 
 # --- Classes ---
 # NullHandler: used to make loggers not output(quiet)
@@ -183,7 +185,7 @@ class netMon:
 			if(icmpType == rip.child().child().ICMP_ECHOREPLY):
 				status = 'reply'
 
-			return 'icmp:'+srcAddr+':'+dstAddr+':'+status
+			return 'icmp:'+status+':'+srcAddr+':'+dstAddr
 
 		def tcpParser(self, rip):
 			status = 'unknown'
@@ -357,8 +359,8 @@ def signal_handler(signal_recv, frame):
 def exit_gracefully():
 	print "\nexiting..."
 	logging.shutdown()
-	print "should exit now =/"
-# !!! this is not very graceful =/
+	print "exit_gracefully is done!"
+# !!! this is not very graceful =/ maybe raise signal to all threads?
 	sys.exit(0)
 
 def reload_config():
@@ -388,14 +390,7 @@ parser.add_argument('-f','--socketFile',
 	default=DEFAULT_SOCKET_FILE,
 	help='File to listen for clients(default is '+str(DEFAULT_SOCKET_FILE)+').')
 
-# IMPLEMENT!
-# !!! implement file
-# parser.add_argument('-p', '--port',
-#	dest='port',
-#	required=False,
-#	metavar='port',
-#	default=DEFAULT_PORT,
-#	help='Port to listen for clients. If a file is specified will create socket at file(default is '+str(DEFAULT_PORT)+').')
+# TODO:implement inet socket option?
 
 parser.add_argument('-c','--conf', 
 	required=False, 
@@ -429,14 +424,14 @@ parser.add_argument('-v','--verbose',
 	default=DEFAULT_VERBOSE_LEVEL,
 	help='More output(debug|info|warn|error|critical) Warn is default.')
 
-# IMPLEMENT: do not go to background ?
 parser.add_argument('-d','--debug', 
 	required=False, 
 	dest='debug', 
 	action='store_true', 
-	help='Show all output.')
+	default=DEFAULT_DEBUG_LEVEL,
+	help='Do not daemonize.')
 
-# IMPLEMENT
+# TODO?str(sys.exc_info()[0])
 parser.add_argument('-q','--quiet', 
 	required=False, 
 	dest='quiet', 
@@ -454,9 +449,7 @@ LEVELS = {'debug': logging.DEBUG,
 #parse args
 args = parser.parse_args()
 
-#start queue
-myqueue = Queue.Queue()
-
+#load config
 if args.config is not None:
 	print "Config load is not implemented yet"
 	sys.exit(0)
@@ -464,12 +457,13 @@ if args.config is not None:
 #start loggers
 log = logging.getLogger('log')
 
+#set file loggers
 if args.log:
 	print "File logging not implemented yet"
 	sys.exit(0)
 
+#create console logger and set verbosity level
 console = logging.getLogger('console')
-# get verbose level
 try:
 	level = LEVELS[args.verbose]
 	console.setLevel(level)
@@ -487,9 +481,28 @@ else:
 	nh = NullHandler()
 	console.addHandler(nh)
 
+#daemonize! (or not...)
+if args.debug is None or args.debug is not True:
+	pid = 0 #kinda useless but more elegant...
+	try:
+		pid = os.fork()
+
+	except:
+		print "Could not fork:"+str(sys.exc_info()[0])
+		sys.exit(1)
+
+	if pid != 0:
+		console.debug('Main thread forked! Dying...')
+		sys.exit(0)
+
+#start queue
+myqueue = Queue.Queue()
+
+#check for valid interfaces
 console.debug('Checking interface '+str(args.interface))
 ipAddresses = checkInterface(args.interface)
 
+#start threads
 console.debug('Starting sockServer thread')
 sockServer_thread = sockServer(args.socketFile, args.maxClients, myqueue)
 sockServer_thread.start()
@@ -499,6 +512,10 @@ filters = [['tcpSyn-test','tcp[13] = 2'], ['udp-test', 'udp port 53'], ['icmp-te
 netMon(args, ipAddresses, myqueue,filters)
 
 while 1:
-	time.sleep(50)
-	print "."
-exit_gracefully()
+	try:
+		time.sleep(50)
+		print "."
+	except:
+		print "Main (useless) loop end:"+str(sys.exc_info()[0])
+		break
+sys.exit(0)
