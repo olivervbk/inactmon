@@ -4,6 +4,7 @@ import sys
 import signal
 import os, os.path
 import stat
+import copy
 import argparse
 import logging
 
@@ -14,22 +15,29 @@ import socket
 import threading
 import Queue
 
+import ConfigParser
+
 import netifaces
 import pcapy
 import impacket
 from impacket import ImpactDecoder
 
 #TODO:ready a release! =/ and update website
-
 #TODO:implement filter system->name-rules (iface! sets the incoming dst ip :D )
-
+#TODO:set main thread to do something useful, sockServer?(blocks?)
+#TODO:clean up logging system ? =/
 #FIXME:do daemonic threads damage non-renewable system resources?(inet sockets?)(pcap resources?)
 
 # --- Default Values ---
-DEFAULT_MAX_CLIENTS = 5
-DEFAULT_SOCKET_FILE = '/tmp/inactmon.sock'
-DEFAULT_VERBOSE_LEVEL = 'warn'
-DEFAULT_DEBUG_LEVEL = False
+DEFAULT = {}
+DEFAULT['max clients'] = 5
+DEFAULT['socket file'] = '/tmp/inactmon.sock'
+DEFAULT['verbose'] = 'warn'
+DEFAULT['debug'] = False
+DEFAULT['config'] = 'inactmon.conf' #FIXME:/etc/inactmon.conf
+DEFAULT['log'] = 'inactmon.log'#FIXME:/var/log/inactmon.log
+
+CURRENT = copy.deepcopy(DEFAULT) #damned objects...
 
 # --- Classes ---
 # NullHandler: used to make loggers not output(quiet)
@@ -37,7 +45,11 @@ class NullHandler(logging.Handler):
     def emit(self, record):
         pass
 
+# Class that handles clients
 class sockServer(threading.Thread):
+	#This subclass handles the client comunication in a separate thread. Handles all clients,
+	#not just one per instance...
+	#Less elegant, though easier than the alternative, multiple inter-thread queues...
 	class clientsHandler(threading.Thread):
 		queue = None
 		clients = []
@@ -51,7 +63,10 @@ class sockServer(threading.Thread):
 
 		def run(self):
 			self.logger.debug( "loop")
-			deadClients = []
+			deadClients = [] #lists clients to be removed because of death
+
+			#Main loop: checks for new messages and sends them to all clients in list
+			#Checks also if clients are still conected.
 			while True:
 				try:
 					message = self.queue.get()
@@ -70,7 +85,7 @@ class sockServer(threading.Thread):
 					except:
 						self.logger.info( "client died?:"+str(sys.exc_info()[0]))
 						deadClients.append(client)
-				self.queue.task_done()
+				self.queue.task_done() #kinda useless, required by queue
 			
 				self.logger.debug("removing dead clients...")
 				for client in deadClients:
@@ -79,6 +94,7 @@ class sockServer(threading.Thread):
 				#clear deadClients again
 				deadClients = []
 
+		#Called by owner to add more clients
 		def append(self, connection):
 			self.logger.debug("appended connection")
 			self.clients.append(connection)
@@ -107,6 +123,7 @@ class sockServer(threading.Thread):
 
 
 	def run(self):
+		#Create unix socket
 		self.sock = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
 		try:
 		    os.remove(self.sockFile)
@@ -122,7 +139,6 @@ class sockServer(threading.Thread):
 		self.logger.info("Listening for connections...")
 		self.sock.listen(self.maxClients)
 		while True:
-			# get queue
 			try:
 #this may block
 				connection, address = self.sock.accept()
@@ -130,11 +146,15 @@ class sockServer(threading.Thread):
 			except:
 				print "socket loop exception:"+str(sys.exc_info()[0])
 				break
+
+		#The following will probably never run since sock.accept() blocks and this thread is 'killed' on exit
 		self.sock.close()
 		self.logger.warn("exiting gracefully")
 		exit_gracefully()
-			
+
+# Class that handles filters	
 class netMon:
+	# Handles parsing of headers to send to clients, didn't need to be a class but probably better so.
 	class netMonMessenger:
 		logger = None
 		def __init__(self):
@@ -228,6 +248,7 @@ class netMon:
 
 			return message
 
+	# Variable filter class
 	class netMonFilter(threading.Thread):
 		args = None
 		ipAddresses = None
@@ -237,23 +258,38 @@ class netMon:
 		name = None
 		rule = None
 
-		def __init__(self,args,ipAddresses,myqueue,messenger,name,rule):
-			#FIXME: args really needed ? =/
-			self.args = args
-			self.ipAddresses = ipAddresses
-			self.myqueue = myqueue
-			self.messenger = messenger
+		def __init__(self,myqueue,messenger,name,rule,iface):
+			#FIXME: args really needed ? =/ just interface is needed... and should be specified by config
+			self.iface = iface
 			self.name = name
 			self.rule = rule
+
+			self.myqueue = myqueue
+			self.messenger = messenger
+
+			self.ipAddresses = self.checkInterface(iface)
 			self.logger = logging.getLogger('console.netMon.'+self.name)
+
 			threading.Thread.__init__(self)
+
 			self.logger.debug("init:done")
 
 		def run(self):
 			self.logger.debug("run")
 
-			cap = pcapy.open_live(self.args.interface, 1500, 0, 0)
+			# Arguments here are:
+			#   device
+			#   snaplen (maximum number of bytes to capture _per_packet_)
+			#   promiscious mode (1 for true)
+			#   timeout (in milliseconds)
+
+			cap = pcapy.open_live(self.iface, 1500, 0, 0)
+			if pcapy.DLT_EN10MB != cap.datalink():
+				print "Interface is not ethernet based. Quitting..."
+				thread.interrupt_main()
 			
+			#print "%s: net=%s, mask=%s, addrs=%s" % (self.args.interface, cap.getnet(), cap.getmask(), str(self.ipAddresses))
+
 			self.logger.debug('Setting filter')
 			try:
 				cap.setfilter(self.rule)
@@ -276,82 +312,66 @@ class netMon:
 
 			self.logger.info("stopping...")
 
+		def checkInterface(self, iface):
+			ipAddresses = [] 
+
+			# check if there are interfaces available with pcapy
+			try:
+				ifs = pcapy.findalldevs()
+			except pcapy.PcapError:
+				print "Unable to get interfaces. Are you running as root?"
+				thread.interrupt_main()
+
+			if 0 == len(ifs):
+				print "No interfaces available."
+				thread.interrupt_main()
+
+			if not iface in ifs:
+				print "Interface '%s' not found." % (iface)
+				thread.interrupt_main()
+
+			for ifaceName in netifaces.interfaces():
+				try:
+					addresses = netifaces.ifaddresses(ifaceName)[netifaces.AF_INET]
+					for address in netifaces.ifaddresses(ifaceName)[netifaces.AF_INET]:
+						if iface == 'any':
+							ipAddresses.append(address['addr'])
+						elif iface == ifaceName:
+							ipAddresses.append(address['addr'])
+				except KeyError:
+					if iface == ifaceName:
+						print "Interface '%s' is down." % (iface)
+						thread.interrupt_main()
+			return ipAddresses
 	args = None
 	ipAddresses = None
 	logger = None
 
-	def __init__(self,args,ipAddresses,myqueue,filters):
-		self.args = args
-		self.ipAddresses = ipAddresses
+	def __init__(self,myqueue,filters):
 		self.myqueue = myqueue
+		self.filters = filters
+
 		self.logger = logging.getLogger('console.netMon')
-		#threading.Thread.__init__(self)
+
+		#FIXME:clean this
+		#threading.Thread.__init__(self) #this is not a thread anymore
 		self.logger.debug("init:done")
-		self.run()
+		self.run() #since it is not a thread
 
 	def run(self):
 		self.logger.debug("run")
 		messenger = self.netMonMessenger()
 
-		# Arguments here are:
-		#   device
-		#   snaplen (maximum number of bytes to capture _per_packet_)
-		#   promiscious mode (1 for true)
-		#   timeout (in milliseconds)
-	
-		self.logger.debug("testing interface(s?)")
-		cap = pcapy.open_live(self.args.interface, 1500, 0, 0)
-
-		#2DO:this test should only be made once!
-		if pcapy.DLT_EN10MB != cap.datalink():
-			print "Interface is not ethernet based. Quitting..."
-			exit_gracefully()
-			return; # this should exit the thread..?
-		#remove cap after test ? =/
-
-		# FIXME:remove this line?
-		print "%s: net=%s, mask=%s, addrs=%s" % (self.args.interface, cap.getnet(), cap.getmask(), str(self.ipAddresses))
-
 		self.logger.debug("starting filter engines")
 		for oneFilter in filters:
-			filter_thread = self.netMonFilter(args, ipAddresses, myqueue, messenger, oneFilter[0], oneFilter[1])	
+			filter_thread = self.netMonFilter(myqueue, messenger, oneFilter[0], oneFilter[1], oneFilter[2])	
 			filter_thread.setDaemon(True)
 			filter_thread.start()
 
 		self.logger.debug("done creating engines")
 		
+#FIXME:set as function in netMon
 
-def checkInterface(iface):
-	ipAddresses = [] 
-
-	# check if there are interfaces available with pcapy
-	try:
-		ifs = pcapy.findalldevs()
-	except pcapy.PcapError:
-		print "Unable to get interfaces. Are you running as root?"
-		sys.exit(1)
-
-	if 0 == len(ifs):
-		print "No interfaces available."
-		sys.exit(1)
-
-	if not iface in ifs:
-		print "Interface '%s' not found." % (iface)
-		sys.exit(1)
-
-	for ifaceName in netifaces.interfaces():
-		try:
-			addresses = netifaces.ifaddresses(ifaceName)[netifaces.AF_INET]
-			for address in netifaces.ifaddresses(ifaceName)[netifaces.AF_INET]:
-				if iface == 'any':
-					ipAddresses.append(address['addr'])
-				elif iface == ifaceName:
-					ipAddresses.append(address['addr'])
-		except KeyError:
-			if iface == ifaceName:
-				print "Interface '%s' is down." % (iface)
-				sys.exit(1)
-	return ipAddresses
 
 def signal_handler(signal_recv, frame):
 	if signal_recv == signal.SIGINT:
@@ -366,86 +386,121 @@ def exit_gracefully():
 	logging.shutdown()
 	print "exit_gracefully is done!"
 
-#FIXME:socket.accept and pcapy.next are blocking... AND signals are only treated in the main thread... cu
+#FIXME:socket.accept and pcapy.next are blocking... AND signals are only treated in the main thread..,
 #	this could lead to problems when dealing with non reusable system resources(like inet sockets =/)
+#	With daemonic threads they are killed automatically and silently... I guess...
 
+#	Alternatives:
 #	signal.alarm() # does nothing =/ must implement with alarm.pause? but socket.accept is blocking...
 #	os.kill(os.getpid(), signal.SIGKILL) # kills all threads
 #	os.kill(os.getpid(), signal.SIGTERM) # terminates all threads
 #	os._exit(0) # kills all threads
 #	sys.exit(0) # does only exit current thread(main)
+
 	sys.exit(0)
 
 def reload_config():
+#TODO:implement
 	print "\nreload config"
 	
+#FIXME:separate the rest into MAIN
+
+#Set signal handling
 signal.signal(signal.SIGINT, signal_handler)
 signal.signal(signal.SIGHUP, signal_handler)
 
-parser = argparse.ArgumentParser(description='Monitor connection attempts.')
+#Get config file to load defaults from
+optionNum = -1
+try:
+	optionNum = sys.argv.index('-c')
+except ValueError:
+	try:
+		optionNum = sys.argv.index('--conf')
+	except ValueError:
+		pass
+if(optionNum != -1):
+	CURRENT['config'] = sys.argv[optionNum+1]
 
-parser.add_argument('-i','--interface', 
-	dest='interface', 
-	required=True, 
-	metavar='iface', 
-	help='Interface to capture on.')
+#Load config file
+configParser = ConfigParser.ConfigParser()
+#FIXME:try!
+configParser.readfp(open(CURRENT['config']))
 
-parser.add_argument('-s','--promiscuous', 
-	dest='promiscuous', 
-	required=False,  
-	action='store_true',
-	help='Set the capture interface to promiscuous. Might be needed by some options.')
+allowedConfigIndexes = ['socket file', 'log', 'max clients', 'debug', 'verbose']
 
-parser.add_argument('-f','--socketFile', 
+try:
+	configParser.sections().index('global')
+except ValueError:
+	pass
+else:
+	print "parsing global configurations"
+	for item in configParser.items('global'):
+		print item
+		try:
+			allowedConfigIndexes.index(item[0])
+		except ValueError:
+			continue
+
+		if item[0] == 'debug':
+			CURRENT[item[0]] = configParser.getboolean('global', item[0])
+		else:
+			CURRENT[item[0]] = item[1]
+
+	print "finished parsing global configurations"
+
+#Set argument parsing
+argvParser = argparse.ArgumentParser(description='Monitor connection attempts.')
+
+argvParser.add_argument('-f','--socketFile', 
 	dest='socketFile', 
 	required=False, 
 	metavar='file', 
-	default=DEFAULT_SOCKET_FILE,
-	help='File to listen for clients(default is '+str(DEFAULT_SOCKET_FILE)+').')
+	default=DEFAULT['socket file'],
+	help='File to listen for clients(default is '+str(DEFAULT['socket file'])+').')
 
 # TODO:implement inet socket option?
 
-parser.add_argument('-c','--conf', 
+argvParser.add_argument('-c','--conf', 
 	required=False, 
 	dest='config',
 	type=str, 
 	metavar='config-file',
-	default=None,
+	default=DEFAULT['config'],
 	help='File holding the configuration.')
 
-# IMPLEMENT!
-# !!! implement in log function
-parser.add_argument('-l','--log', 
+#FIXME:implement
+argvParser.add_argument('-l','--log', 
 	required=False, 
 	dest='log',
 	type=str, 
 	metavar='log-file',
+	default=CURRENT['log'],
 	help='File to log to.')
 
 # IMPLEMENT
-parser.add_argument('-m','--max-clients', 
+argvParser.add_argument('-m','--max-clients', 
 	required=False, 
 	dest='maxClients', 
 	metavar='clients',
-	default=DEFAULT_MAX_CLIENTS,
-	help='Number of allowed clients(default is '+str(DEFAULT_MAX_CLIENTS)+').')
+	default=CURRENT['max clients'],
+	help='Number of allowed clients(default is '+str(DEFAULT['max clients'])+').')
 
-parser.add_argument('-v','--verbose', 
+argvParser.add_argument('-v','--verbose', 
 	required=False, 
 	dest='verbose',  
 	type=str,
-	default=DEFAULT_VERBOSE_LEVEL,
+	default=CURRENT['verbose'],
 	help='More output(debug|info|warn|error|critical) Warn is default.')
 
-parser.add_argument('-d','--debug', 
+argvParser.add_argument('-d','--debug', 
 	required=False, 
 	dest='debug', 
 	action='store_true', 
-	default=DEFAULT_DEBUG_LEVEL,
+	default=CURRENT['debug'],
 	help='Do not daemonize.')
 
-# TODO?str(sys.exc_info()[0])
-parser.add_argument('-q','--quiet', 
+# TODO:implement
+argvParser.add_argument('-q','--quiet', 
 	required=False, 
 	dest='quiet', 
 	action='store_true', 
@@ -460,12 +515,7 @@ LEVELS = {'debug': logging.DEBUG,
           'critical': logging.CRITICAL}
 
 #parse args
-args = parser.parse_args()
-
-#load config
-if args.config is not None:
-	print "Config load is not implemented yet"
-	sys.exit(0)
+args = argvParser.parse_args()
 
 #start loggers
 log = logging.getLogger('log')
@@ -473,7 +523,8 @@ log = logging.getLogger('log')
 #set file loggers
 if args.log:
 	print "File logging not implemented yet"
-	sys.exit(0)
+	#sys.exit(0)
+	pass
 
 #create console logger and set verbosity level
 console = logging.getLogger('console')
@@ -511,10 +562,6 @@ if args.debug is None or args.debug is not True:
 #start queue
 myqueue = Queue.Queue()
 
-#check for valid interfaces
-console.debug('Checking interface '+str(args.interface))
-ipAddresses = checkInterface(args.interface)
-
 #start threads
 console.debug('Starting sockServer thread')
 sockServer_thread = sockServer(args.socketFile, args.maxClients, myqueue)
@@ -522,9 +569,12 @@ sockServer_thread.setDaemon(True)
 sockServer_thread.start()
 
 console.debug('Starting netMon')
+#FIXME:this should be loaded from config
 filters = [['tcpSyn-test','tcp[13] = 2'], ['udp-test', 'udp port 53'], ['icmp-test','icmp']]
-netMon(args, ipAddresses, myqueue,filters)
 
+netMon(myqueue,filters)
+
+#FIXME:should set main thread to do something useful? sockServer? (which blocks?)
 while 1:
 	try:
 		time.sleep(50)
