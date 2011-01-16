@@ -23,9 +23,9 @@ import impacket
 from impacket import ImpactDecoder
 
 #TODO:ready a release! =/ and update website
-#TODO:implement filter system->name-rules (iface! sets the incoming dst ip :D )
 #TODO:set main thread to do something useful, sockServer?(blocks?)
 #TODO:clean up logging system ? =/
+#TODO:specials types of filters? (arp-spoofing, et cetera)
 #FIXME:do daemonic threads damage non-renewable system resources?(inet sockets?)(pcap resources?)
 
 # --- Default Values ---
@@ -258,7 +258,7 @@ class netMon:
 		name = None
 		rule = None
 
-		def __init__(self,myqueue,messenger,name,rule,iface):
+		def __init__(self,myqueue,messenger,name,iface,rule):
 			#FIXME: args really needed ? =/ just interface is needed... and should be specified by config
 			self.iface = iface
 			self.name = name
@@ -428,6 +428,8 @@ configParser.readfp(open(CURRENT['config']))
 
 allowedConfigIndexes = ['socket file', 'log', 'max clients', 'debug', 'verbose']
 
+filters = []
+
 try:
 	configParser.sections().index('global')
 except ValueError:
@@ -447,6 +449,15 @@ else:
 			CURRENT[item[0]] = item[1]
 
 	print "finished parsing global configurations"
+
+	for section in configParser.sections():
+		if section == 'global':
+			continue
+		print "reading section:"+section
+		iface = configParser.get(section, 'iface')
+		rule = configParser.get(section, 'rule')
+		
+		filters.append([section, iface, rule])
 
 #Set argument parsing
 argvParser = argparse.ArgumentParser(description='Monitor connection attempts.')
@@ -570,7 +581,7 @@ sockServer_thread.start()
 
 console.debug('Starting netMon')
 #FIXME:this should be loaded from config
-filters = [['tcpSyn-test','tcp[13] = 2'], ['udp-test', 'udp port 53'], ['icmp-test','icmp']]
+#filters = [['tcpSyn-test','tcp[13] = 2'], ['udp-test', 'udp port 53'], ['icmp-test','icmp']]
 
 netMon(myqueue,filters)
 
