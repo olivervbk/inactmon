@@ -25,7 +25,7 @@ DEFAULT_SOCKET_FILE = '/tmp/inactmon.sock'
 
 def exit_gracefully():
 	print "exiting gracefully..."
-	sys.exit(0)
+	gtk.main_quit() #w00t!
 
 class notificationManager(threading.Thread):
 	__name__='notificationManager'
@@ -128,6 +128,7 @@ class notificationManager(threading.Thread):
 			except:
 				print "notMan:Terminated! Error:",sys.exc_info()[0]
 				break
+		print "...got here?"
 		sock.close()
 		exit_gracefully()
 
@@ -160,6 +161,8 @@ def debug(caller,message,level):
 		print level+':'+str(caller)+':'+str(message)
 
 parser = argparse.ArgumentParser(description='Incoming Netword Activity Client.')
+
+#TODO: perhaps enable inet socket as well
 # parser.add_argument('-p', '--port',
 #	dest='port',
 #	required=False,

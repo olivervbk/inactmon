@@ -22,7 +22,7 @@ import pcapy
 import impacket
 from impacket import ImpactDecoder
 
-#TODO:ready a release! =/ and update website
+#TODO:ready a release! =/
 #TODO:set main thread to do something useful, sockServer?(blocks?)
 #TODO:clean up logging system ? =/
 #TODO:specials types of filters? (arp-spoofing, et cetera)
@@ -250,24 +250,24 @@ class netMon:
 
 	# Variable filter class
 	class netMonFilter(threading.Thread):
-		args = None
 		ipAddresses = None
 		myqueue = None
 		messenger = None
 		logger = None
 		name = None
-		rule = None
+		attributes = None
+		iface = None
 
-		def __init__(self,myqueue,messenger,name,iface,rule):
+		def __init__(self,myqueue,messenger,name,attributes):
 			#FIXME: args really needed ? =/ just interface is needed... and should be specified by config
-			self.iface = iface
+			self.attributes = attributes
+			self.iface = attributes['iface']
 			self.name = name
-			self.rule = rule
 
 			self.myqueue = myqueue
 			self.messenger = messenger
 
-			self.ipAddresses = self.checkInterface(iface)
+			self.ipAddresses = self.checkInterface(self.iface)
 			self.logger = logging.getLogger('console.netMon.'+self.name)
 
 			threading.Thread.__init__(self)
@@ -286,31 +286,40 @@ class netMon:
 			cap = pcapy.open_live(self.iface, 1500, 0, 0)
 			if pcapy.DLT_EN10MB != cap.datalink():
 				print "Interface is not ethernet based. Quitting..."
-				thread.interrupt_main()
+				exit_gracefully()
 			
 			#print "%s: net=%s, mask=%s, addrs=%s" % (self.args.interface, cap.getnet(), cap.getmask(), str(self.ipAddresses))
 
-			self.logger.debug('Setting filter')
 			try:
-				cap.setfilter(self.rule)
-			except:
-				print "Unable to set rule '"+self.rule+"' for filter '"+self.name+"'"
-				exit_gracefully()
+				self.rule = self.attributes['rule']
+			except KeyError:
+				self.type = self.attributes['type']
+				print "type = "+self.type+" not implemented..."
+				return
 
-			self.logger.info('Waiting for packet...')
-			while True:
+			
+			if self.rule:
+				self.logger.debug('Setting filter')
 				try:
-#this may block
-					(header, payload) = cap.next()
+					cap.setfilter(self.rule)
 				except:
-					print "cap.next() exception:"+str(sys.exc_info()[0])
+					print "Unable to set rule '"+self.rule+"' for filter '"+self.name+"'"
 					exit_gracefully()
 
-				message = self.messenger.parse(payload, self.name)
-				self.logger.debug("msg rcvd: "+str(message))
-				self.myqueue.put(message)
+				self.logger.info('Waiting for packet...')
+				while True:
+					try:
+	#this may block
+						(header, payload) = cap.next()
+					except:
+						print "cap.next() exception:"+str(sys.exc_info()[0])
+						exit_gracefully()
 
-			self.logger.info("stopping...")
+					message = self.messenger.parse(payload, self.name)
+					self.logger.debug("msg rcvd: "+str(message))
+					self.myqueue.put(message)
+
+				self.logger.info("stopping...")
 
 		def checkInterface(self, iface):
 			ipAddresses = [] 
@@ -320,15 +329,15 @@ class netMon:
 				ifs = pcapy.findalldevs()
 			except pcapy.PcapError:
 				print "Unable to get interfaces. Are you running as root?"
-				thread.interrupt_main()
+				exit_gracefully()
 
 			if 0 == len(ifs):
 				print "No interfaces available."
-				thread.interrupt_main()
+				exit_gracefully()
 
 			if not iface in ifs:
 				print "Interface '%s' not found." % (iface)
-				thread.interrupt_main()
+				exit_gracefully()
 
 			for ifaceName in netifaces.interfaces():
 				try:
@@ -341,7 +350,7 @@ class netMon:
 				except KeyError:
 					if iface == ifaceName:
 						print "Interface '%s' is down." % (iface)
-						thread.interrupt_main()
+						exit_gracefully()
 			return ipAddresses
 	args = None
 	ipAddresses = None
@@ -363,14 +372,13 @@ class netMon:
 		messenger = self.netMonMessenger()
 
 		self.logger.debug("starting filter engines")
-		for oneFilter in filters:
-			filter_thread = self.netMonFilter(myqueue, messenger, oneFilter[0], oneFilter[1], oneFilter[2])	
+		for name in filters:
+			self.logger.debug("reading filter'"+name+"'")
+			filter_thread = self.netMonFilter(myqueue, messenger, name, filters[name])	
 			filter_thread.setDaemon(True)
 			filter_thread.start()
 
 		self.logger.debug("done creating engines")
-		
-#FIXME:set as function in netMon
 
 
 def signal_handler(signal_recv, frame):
@@ -400,7 +408,7 @@ def exit_gracefully():
 	sys.exit(0)
 
 def reload_config():
-#TODO:implement
+#TODO:implementin
 	print "\nreload config"
 	
 #FIXME:separate the rest into MAIN
@@ -421,21 +429,28 @@ except ValueError:
 if(optionNum != -1):
 	CURRENT['config'] = sys.argv[optionNum+1]
 
+#TODO:separate configParser to function? =/
+
 #Load config file
 configParser = ConfigParser.ConfigParser()
 #FIXME:try!
-configParser.readfp(open(CURRENT['config']))
-
+try:
+	configParser.readfp(open(CURRENT['config']))
+except:
+	print "Could not read configuration:"+str(sys.exc_info()[0])
+	sys.exit(0)
+	
+#FIXME:put somewhere
 allowedConfigIndexes = ['socket file', 'log', 'max clients', 'debug', 'verbose']
 
-filters = []
+filters = {}
 
 try:
 	configParser.sections().index('global')
 except ValueError:
 	pass
 else:
-	print "parsing global configurations"
+	print "parsing global configurations" 	#FIXME:remove
 	for item in configParser.items('global'):
 		print item
 		try:
@@ -453,11 +468,40 @@ else:
 	for section in configParser.sections():
 		if section == 'global':
 			continue
-		print "reading section:"+section
-		iface = configParser.get(section, 'iface')
-		rule = configParser.get(section, 'rule')
+		print "reading section:"+section #FIXME:remove
+		filters[section] = {}
+
+		try:
+			iface = configParser.get(section, 'iface')
+		except ConfigParser.NoOptionError:
+			print "Missing iface information from filter:"+section
+			sys.exit(0)
+		except:
+			print "Unknown error reading iface from filter: "+section+": "+str(sys.exc_info()[0])
+			sys.exit(0)
+		filters[section]['iface'] = iface 
+			
+		try:
+			rule = configParser.get(section, 'rule')
+		except ConfigParser.NoOptionError:
+			try:
+				filterType = configParser.get(section, 'type')
+
+			except ConfigParser.NoOptionError:
+				print "missing rule or type in filter "+section
+				sys.exit(0)
+
+			except:
+				print "Unknown error reading type from filter: "+section+": "+str(sys.exc_info()[0])
+				sys.exit(1)
+			filters[section]['type'] = filterType
+
+		except:
+			print "Unknown error reading rule from filter: "+section+": "+str(sys.exc_info()[0])
+			sys.exit(1)
+		else:
+			filters[section]['rule'] = rule
 		
-		filters.append([section, iface, rule])
 
 #Set argument parsing
 argvParser = argparse.ArgumentParser(description='Monitor connection attempts.')
@@ -488,7 +532,6 @@ argvParser.add_argument('-l','--log',
 	default=CURRENT['log'],
 	help='File to log to.')
 
-# IMPLEMENT
 argvParser.add_argument('-m','--max-clients', 
 	required=False, 
 	dest='maxClients', 
@@ -533,6 +576,7 @@ log = logging.getLogger('log')
 
 #set file loggers
 if args.log:
+	#FIXME:
 	print "File logging not implemented yet"
 	#sys.exit(0)
 	pass
@@ -574,15 +618,12 @@ if args.debug is None or args.debug is not True:
 myqueue = Queue.Queue()
 
 #start threads
-console.debug('Starting sockServer thread')
+console.debug('Starting server')
 sockServer_thread = sockServer(args.socketFile, args.maxClients, myqueue)
 sockServer_thread.setDaemon(True)
 sockServer_thread.start()
 
-console.debug('Starting netMon')
-#FIXME:this should be loaded from config
-#filters = [['tcpSyn-test','tcp[13] = 2'], ['udp-test', 'udp port 53'], ['icmp-test','icmp']]
-
+console.debug('Starting filters')
 netMon(myqueue,filters)
 
 #FIXME:should set main thread to do something useful? sockServer? (which blocks?)
