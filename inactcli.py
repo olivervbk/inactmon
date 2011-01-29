@@ -19,9 +19,52 @@ import appindicator
 
 # FIXME:keep message format synced =/
 # FIXME:use python logging =/ (just dont remember the details..)
-# FIXME:does not exit gracefully on connection term.
 
 DEFAULT_SOCKET_FILE = '/tmp/inactmon.sock'
+
+class appStatus:
+	STATUS_OK = 1
+	STATUS_DISABLED = 2
+	STATUS_ERROR = 3
+	STATUS_RECONNECT = 4
+
+	status = STATUS_OK
+	def __init__(self,ind, status_item):
+		self.ind = ind
+		self.status_item = status_item
+	def getStatus(self):
+		return self.status
+	def setStatus(self, status):
+		if self.status == self.STATUS_OK:
+			if status != self.STATUS_RECONNECT:
+				self.status = status
+		if self.status == self.STATUS_DISABLED:
+			if status != self.STATUS_RECONNECT:
+				self.status = status
+		if self.status == self.STATUS_ERROR:
+			if status != self.STATUS_DISABLED:
+				self.status = status
+		if self.status == self.STATUS_RECONNECT:
+			if status != self.STATUS_DISABLED:
+				self.status = status
+		self.updateMenu()
+	def updateMenu(self):
+		if self.status == self.STATUS_OK:
+			self.ind.set_status(appindicator.STATUS_ACTIVE)
+			self.status_item.set_label("Disable")
+		if self.status == self.STATUS_DISABLED:
+			#FIXME:set icon here...
+			self.ind.set_status(appindicator.STATUS_ATTENTION)
+			self.status_item.set_label("Enable")
+		if self.status == self.STATUS_ERROR:
+			#FIXME:set icon here...
+			self.ind.set_status(appindicator.STATUS_ATTENTION)
+			self.status_item.set_label("Reconnect")
+		if self.status == self.STATUS_RECONNECT:
+			#FIXME:set icon here...
+			self.ind.set_status(appindicator.STATUS_ATTENTION)
+			self.status_item.set_label("Reconnecting...")
+			#FIXME:disable button =/ and reenable elsewheres?
 
 def exit_gracefully():
 	print "exiting gracefully..."
@@ -71,10 +114,13 @@ class notificationManager(threading.Thread):
 		caller = '('+classname+')'+inspect.stack()[1][3]
 		debug(caller, message,level)
 
-	def __init__(self, socketFile):
+	def __init__(self, socketFile, statusMan):
+		#FIXME:no less obscure place to set this? =/
 		gtk.gdk.threads_init() # this makes gtk to allow threads =/
 		self.debug("init", "info")
+
 		self.socketFile = socketFile
+		self.statusMan = statusMan
 		threading.Thread.__init__(self)
 		self.debug("init done","info")
 
@@ -85,17 +131,24 @@ class notificationManager(threading.Thread):
 			exit_gracefully()
 		self.debug("Pynotify init successful", "info")
 
-
-		try:
-			sock = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
-			sock.connect(self.socketFile)
-		except socket.error:
-			print "Unable to connect! Is the server running?"
-			exit_gracefully()
-		except:
-			print "Unknown Error:",sys.exc_info()[0]
-			exit_gracefully()
+		while(True):
+			try:
+				sock = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+				sock.connect(self.socketFile)
+			except socket.error:
+				self.statusMan.setStatus(appStatus.STATUS_ERROR)
+				#FIXME:try to reconnect automatically every x seconds ?
+				print "error connecting to server, waiting for reconnect signal"
+				while(self.statusMan.getStatus() != appStatus.STATUS_RECONNECT):
+					time.sleep(0.2)
+				continue
+			except:
+				print "Unknown Error:",sys.exc_info()[0]
+				exit_gracefully()
+			break
 		
+		#if status was reconnecting... 
+		self.statusMan.setStatus(appStatus.STATUS_OK)
 
 		self.debug("Connected to server", "info")
 		while True:
@@ -108,8 +161,11 @@ class notificationManager(threading.Thread):
 			message = message[:-1] # remove trailing newlines
 			print "Message recv:"+message
 		
-			try:
+			if(self.statusMan.getStatus() == appStatus.STATUS_DISABLED):
+				print "ignoring message"
+				continue
 
+			try:
 				notification = pynotify.Notification(
 					"Inactcli",
 					self.messageParser(message),
@@ -129,29 +185,29 @@ class notificationManager(threading.Thread):
 				print "notMan:Terminated! Error:",sys.exc_info()[0]
 				break
 		print "...got here?"
-		sock.close()
-		exit_gracefully()
+		self.run()
 
 
 
-def toggle_status(widget, event=None):
-	global ind
-	global status_item
-	global status
-	print "status_clicked:",event
-	if ind.get_status() == appindicator.STATUS_ACTIVE:
-		ind.set_status(appindicator.STATUS_ATTENTION)
-		status_item.set_label("Enable")
-	else:
-		ind.set_status(appindicator.STATUS_ACTIVE)
-		status_item.set_label("Disable")
-	print "new label:", status_item.get_label()
+def status_button(widget, event=None):
+	#FIXME:no way I guess...
+	global statusMan
+	status = statusMan.getStatus()
+	if status == appStatus.STATUS_OK:
+		statusMan.setStatus(appStatus.STATUS_DISABLED)
+	if status == appStatus.STATUS_DISABLED:
+		statusMan.setStatus(appStatus.STATUS_OK)
+	if status == appStatus.STATUS_ERROR:
+		statusMan.setStatus(appStatus.STATUS_RECONNECT)
+	if status == appStatus.STATUS_RECONNECT:
+		#do nothing :D
+		pass
 
-def destroy(widget, event=None):
+def destroy_button(widget, event=None):
 	print "Quitting via tray..."
 	exit_gracefully()
 
-def about(widget, event=None):
+def about_button(widget, event=None):
 	print "Status clicked..."
 
 
@@ -196,13 +252,6 @@ parser.add_argument('-q','--quiet',
 args = parser.parse_args()
 verbose = args.verbose
 
-# notMan = notificationManager(args.server, args.port)
-
-debug("main","Threading notificationManager","info")
-notMan = notificationManager( args.socketFile)
-notMan.setDaemon(True)
-notMan.start()
-
 ind = appindicator.Indicator ("inactcli",
 	"inactcli-active",
 	appindicator.CATEGORY_APPLICATION_STATUS)
@@ -212,24 +261,31 @@ ind.set_attention_icon ("inactcli-passive")
 menu = gtk.Menu()
 
 status_item = gtk.MenuItem("Disable")
-status_item.connect("activate", toggle_status, "status clicked")
+status_item.connect("activate", status_button, "status clicked")
 status_item.show()
 menu.append(status_item)
 
 about_item = gtk.MenuItem("About")
-about_item.connect("activate", about,"about")
+about_item.connect("activate", about_button,"about")
 about_item.show()
 menu.append(about_item)
 
 quit_item = gtk.MenuItem("Quit")
-quit_item.connect("activate", destroy, "file.quit")
+quit_item.connect("activate", destroy_button, "file.quit")
 quit_item.show()
 menu.append(quit_item)
 
 ind.set_menu(menu)
+
+statusMan = appStatus(ind,status_item)
+
+debug("main","Threading notificationManager","info")
+notMan = notificationManager( args.socketFile, statusMan)
+notMan.setDaemon(True)
+notMan.start()
+
 try:
 	gtk.main()
-	#time.sleep(50)
 except:
-	print "notMan:Terminated! Error:",sys.exc_info()[0]
-	exit_gracefully()
+	print "main:Terminated! Error:",sys.exc_info()[0]
+	#exit_gracefully()
