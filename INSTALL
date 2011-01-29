@@ -1,0 +1,15 @@
+1.pray to your god...
+
+2.try running 'sudo ./inactmon.py -d -v debug' to see what gives...
+
+3.check out inactmon.conf
+
+4.run './inactcli.py -v' to get started receiving spam from your computer :D
+
+5.if there are any errors on icons from inactcli.py, run './configure-icon.sh' to set the icons to the system
+
+Note:
+-don't really know if setting icons is needed, I guess they work if they are in the current dir...
+-developed in ubuntu 10.10 with some packages like python-impacket and python-libpcap (or similar names...)
+
+If your OS is not supported, and is not Windows or Mac, then report in bug report section and I'll take a look...
