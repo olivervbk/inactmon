@@ -1,8 +1,19 @@
 TODO:
 -make better todo list
+
+-create fallbacks: 
+appindicator->eggtrayicon->gtk.statusIcon
+gtk->(qt?)->terminal only...
+netifaces->system('ifconfig...?')
+-try to reduce dependencies and increase portability...
+-test in kde?
+-test in non ubuntu OS?
+-develop for fluxbox
+
 -create some filter types(like incomming udp packets, arp-spoof, w/e)
 -setup logging in client
--improve message capabilities in client
+-enable settings to force fallbacks..?
+
 -create about window
 -install script+stuff
 -create manpages

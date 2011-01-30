@@ -10,17 +10,55 @@ import socket
 
 import inspect
 
-import argparse
-import pynotify
-
-import gobject
-import gtk
-import appindicator
-
+# FIXME:aboutdialog in appindicator crashes on close
 # FIXME:keep message format synced =/
-# FIXME:use python logging =/ (just dont remember the details..)
+# FIXME:use python logging =/ (just dont remember the details..) and remove inspect
+
+FEATURES = {}
+FEATURES['notify'] = True
+FEATURES['interface'] = None
+FEATURES['tray'] = None
 
 DEFAULT_SOCKET_FILE = '/tmp/inactmon.sock'
+
+try:
+	import argparse
+except:
+	print "Could not import argparse. Please install python-argparse."
+	sys.exit(1)
+
+try:
+	import pynotify
+except:
+	print "Could not import pynotify. Please install python-pynotify."
+	FEATURES['notify'] = False
+	sys.exit(1)
+
+try:
+	import appindicator2
+except:
+	print "Could not import appindicator. Trying fallback..."
+	try:
+		import egg.trayicon
+	except:
+		print "Could not import eggtrayicon. Trying fallback..."
+		FEATURES['tray'] = "gtk"
+	else:
+		FEATURES['tray'] = "egg"
+else:
+	FEATURES['tray'] = "indicator"
+
+try:
+	import gobject
+	import gtk
+except:
+	print "Could not load GTK. Trying fallback..."
+	FEATURES['interface'] = False
+	FEATURES['tray'] = False
+else:
+	if FEATURES['tray'] is None:
+		FEATURES['tray'] = "gtk"
+	FEATURES['interface'] = "gtk"
 
 class appStatus:
 	STATUS_OK = 1
@@ -29,9 +67,10 @@ class appStatus:
 	STATUS_RECONNECT = 4
 
 	status = STATUS_OK
-	def __init__(self,ind, status_item):
-		self.ind = ind
-		self.status_item = status_item
+	tray = None
+
+	def __init__(self,tray):
+		self.tray = tray
 	def getStatus(self):
 		return self.status
 	def setStatus(self, status):
@@ -50,20 +89,20 @@ class appStatus:
 		self.updateMenu()
 	def updateMenu(self):
 		if self.status == self.STATUS_OK:
-			self.ind.set_status(appindicator.STATUS_ACTIVE)
-			self.status_item.set_label("Disable")
+			self.tray.setIcon(icon = None, status = "active")
+			self.tray.setActionLabel(label = "Disable")
 		if self.status == self.STATUS_DISABLED:
 			#FIXME:set icon here...
-			self.ind.set_status(appindicator.STATUS_ATTENTION)
-			self.status_item.set_label("Enable")
+			self.tray.setIcon(icon = None, status = "attention")
+			self.tray.setActionLabel(label = "Enable")
 		if self.status == self.STATUS_ERROR:
 			#FIXME:set icon here...
-			self.ind.set_status(appindicator.STATUS_ATTENTION)
-			self.status_item.set_label("Reconnect")
+			self.tray.setIcon(icon = None, status = "attention")
+			self.tray.setActionLabel(label = "Reconnect")
 		if self.status == self.STATUS_RECONNECT:
 			#FIXME:set icon here...
-			self.ind.set_status(appindicator.STATUS_ATTENTION)
-			self.status_item.set_label("Reconnecting...")
+			self.tray.setIcon(icon = None, status = "attention")
+			self.tray.setActionLabel(label = "Reconnecting...")
 			#FIXME:disable button =/ and reenable elsewheres?
 
 def exit_gracefully():
@@ -187,30 +226,7 @@ class notificationManager(threading.Thread):
 		print "...got here?"
 		self.run()
 
-
-
-def status_button(widget, event=None):
-	#FIXME:no way I guess...
-	global statusMan
-	status = statusMan.getStatus()
-	if status == appStatus.STATUS_OK:
-		statusMan.setStatus(appStatus.STATUS_DISABLED)
-	if status == appStatus.STATUS_DISABLED:
-		statusMan.setStatus(appStatus.STATUS_OK)
-	if status == appStatus.STATUS_ERROR:
-		statusMan.setStatus(appStatus.STATUS_RECONNECT)
-	if status == appStatus.STATUS_RECONNECT:
-		#do nothing :D
-		pass
-
-def destroy_button(widget, event=None):
-	print "Quitting via tray..."
-	exit_gracefully()
-
-def about_button(widget, event=None):
-	print "Status clicked..."
-
-
+#FIXME:this must go
 def debug(caller,message,level):
 	global args
 	if args.verbose:
@@ -252,32 +268,170 @@ parser.add_argument('-q','--quiet',
 args = parser.parse_args()
 verbose = args.verbose
 
-ind = appindicator.Indicator ("inactcli",
-	"inactcli-active",
-	appindicator.CATEGORY_APPLICATION_STATUS)
-ind.set_status (appindicator.STATUS_ACTIVE)
-ind.set_attention_icon ("inactcli-passive")
-# create a menu
-menu = gtk.Menu()
+if FEATURES['interface'] == "gtk":
+	class aboutDialog:
+		def __init__(self):
+			aboutdialog = gtk.AboutDialog()
+			aboutdialog.set_name("Inactmon-cli")
+			aboutdialog.set_version("1.0")
+			aboutdialog.set_copyright("Don't redistribute! :P")
+			aboutdialog.set_comments("Shows notifications about incomming activity based on pcap rules.")
+			aboutdialog.set_authors(["Oliver Kuster"])
+			aboutdialog.set_logo(gtk.gdk.pixbuf_new_from_file_at_size("eye-version3-active.svg",100,100))
+		
+			aboutdialog.run()
+			aboutdialog.destroy()
+else:
+	class aboutDialog:
+		def __init__(self):
+			print "interface not specified..."
 
-status_item = gtk.MenuItem("Disable")
-status_item.connect("activate", status_button, "status clicked")
-status_item.show()
-menu.append(status_item)
+if FEATURES['tray'] == 'indicator':
+	class trayIcon:
+		ind = None
+		status_item = None
+		def __init__(self):
+			self.ind = ind = appindicator.Indicator ("inactcli",
+				"inactcli-active",
+				appindicator.CATEGORY_APPLICATION_STATUS)
+			ind.set_status (appindicator.STATUS_ACTIVE)
+			ind.set_attention_icon ("inactcli-passive")
+			# create a menu
+			menu = gtk.Menu()
 
-about_item = gtk.MenuItem("About")
-about_item.connect("activate", about_button,"about")
-about_item.show()
-menu.append(about_item)
+			self.status_item = status_item = gtk.MenuItem("Disable")
+			status_item.connect("activate", self.status_button, "status clicked")
+			menu.append(status_item)
 
-quit_item = gtk.MenuItem("Quit")
-quit_item.connect("activate", destroy_button, "file.quit")
-quit_item.show()
-menu.append(quit_item)
+			about_item = gtk.MenuItem("About")
+			about_item.connect("activate", self.about_button,"about")
+			menu.append(about_item)
 
-ind.set_menu(menu)
+			quit_item = gtk.MenuItem("Quit")
+			quit_item.connect("activate", self.destroy_button, "file.quit")
+			menu.append(quit_item)
+			menu.show_all()
 
-statusMan = appStatus(ind,status_item)
+			ind.set_menu(menu)
+		
+		def setIcon(self, status, icon):
+			if status == "active":
+				status = appindicator.STATUS_ACTIVE
+			elif status == "attention":
+				status = appindicator.STATUS_ATTENTION
+			else:
+				print "Unknown status: "+status
+				return
+			self.ind.set_status(status)
+
+			if icon is not None:
+				self.ind.set_attention_icon(icon)
+
+		def setActionLabel(self,label):
+			self.status_item.set_label(label)
+
+		def status_button(self,widget, event=None):
+			#FIXME:statusMan is actually parent...
+			global statusMan
+			status = statusMan.getStatus()
+			if status == appStatus.STATUS_OK:
+				statusMan.setStatus(appStatus.STATUS_DISABLED)
+			if status == appStatus.STATUS_DISABLED:
+				statusMan.setStatus(appStatus.STATUS_OK)
+			if status == appStatus.STATUS_ERROR:
+				statusMan.setStatus(appStatus.STATUS_RECONNECT)
+			if status == appStatus.STATUS_RECONNECT:
+				#do nothing :D
+				pass
+
+		def destroy_button(self,widget, event=None):
+			print "Quitting via tray..."
+			exit_gracefully()
+
+		def about_button(self,widget, event=None):
+			aboutDialog()
+
+elif FEATURES['tray'] == "egg":
+	class trayIcon:
+		def __init__(self):
+			self.tray = egg.trayicon.TrayIcon("inactcli")
+
+			eventbox = gtk.EventBox()
+			image = gtk.Image()
+			image.set_from_file("eye-version3-active.svg")
+		
+			eventbox.connect("button-press-event", self.icon_clicked)
+		
+			eventbox.add(image)
+			self.tray.add(eventbox)
+			self.tray.show_all()
+
+			self.menu = menu = gtk.Menu()
+			self.menuitem_status = menuitem_status = gtk.MenuItem("Disable")
+			menuitem_about = gtk.MenuItem("About")
+			menuitem_exit = gtk.MenuItem("Exit")
+			menu.append(menuitem_status)
+			menu.append(menuitem_about)
+			menu.append(menuitem_exit)
+			menuitem_about.connect("activate", self.aboutdialog)
+			menuitem_status.connect("activate", self.status_button)
+			#FIXME:exit_gracefully() >_>
+			menuitem_exit.connect("activate", lambda w: gtk.main_quit())
+			menu.show_all()
+		    
+		def icon_clicked(self, widget, event):
+			if event.button == 1:
+				self.menu.popup(None, None, None, event.button, event.time, self.tray)
+		    
+		def aboutdialog(self, widget):
+			aboutDialog()
+
+		def status_button(self,widget, event=None):
+			#FIXME:statusMan is actually parent...
+			global statusMan
+			status = statusMan.getStatus()
+			if status == appStatus.STATUS_OK:
+				statusMan.setStatus(appStatus.STATUS_DISABLED)
+			if status == appStatus.STATUS_DISABLED:
+				statusMan.setStatus(appStatus.STATUS_OK)
+			if status == appStatus.STATUS_ERROR:
+				statusMan.setStatus(appStatus.STATUS_RECONNECT)
+			if status == appStatus.STATUS_RECONNECT:
+				#do nothing :D
+				pass
+
+		def setIcon(self, status, icon):
+			#TODO:implement
+			pass
+		def setActionLabel(self,label):
+			self.menuitem_status.set_label(label)
+		
+elif FEATURES['tray'] == "gtk":
+	class trayIcon:
+		def __init__(self):
+			print "class trayIcon for gtk is not implemented yet..."
+			#TODO:implement
+		def setIcon(self, status, icon):
+			#TODO:implement
+			pass
+		def setActionLabel(self,label):
+			#TODO:implement
+			pass
+
+else:
+	class trayIcon:
+		def __init__(self):
+			print "class trayIcon for no interface loaded..."
+		def setIcon(self, status, icon):
+			#TODO:implement
+			pass
+		def setActionLabel(self,label):
+			#TODO:implement
+			print "New label:"+label
+
+tray = trayIcon()
+
+statusMan = appStatus(tray)
 
 debug("main","Threading notificationManager","info")
 notMan = notificationManager( args.socketFile, statusMan)

@@ -4,29 +4,42 @@ import sys
 import signal
 import os, os.path
 import stat
-import copy
-import argparse
-import logging
-
 import time
 import datetime
 
+import copy
+import ConfigParser
 import socket
 import threading
 import Queue
+import logging
 
-import ConfigParser
 
-import netifaces
-import pcapy
-import impacket
-from impacket import ImpactDecoder
-
-#TODO:ready a release! =/
 #TODO:set main thread to do something useful, sockServer?(blocks?)
 #TODO:clean up logging system ? =/
 #TODO:specials types of filters? (arp-spoofing, et cetera)
 #FIXME:do daemonic threads damage non-renewable system resources?(inet sockets?)(pcap resources?)
+
+# Import needed libraries
+try:
+	import pcapy
+except:
+	print "Error: could not import pcapy. Please install python-pcapy."
+	sys.exit(1)
+
+try:
+	import impacket
+	from impacket import ImpactDecoder
+except:
+	print "Error: could not import impacket. Please install python-impacket."
+	sys.exit(1)
+
+LEVELS = {'debug': logging.DEBUG,
+          'info': logging.INFO,
+          'warn': logging.WARNING,
+          'error': logging.ERROR,
+          'critical': logging.CRITICAL}
+
 
 # --- Default Values ---
 DEFAULT = {}
@@ -39,11 +52,33 @@ DEFAULT['log'] = 'inactmon.log'#FIXME:/var/log/inactmon.log
 
 CURRENT = copy.deepcopy(DEFAULT) #damned objects...
 
+# --- Enabled features ---
+FEATURES = {}
+FEATURES['arguments'] = True
+#FEATURES['logging']   = True
+FEATURES['netifaces'] = True
+
+try:
+	import argparse
+except:
+	FEATURES['arguments'] = False
+	print "Could no import arparse, no alternative implemented yet..."
+	print "Please install python-argparser."
+	sys.exit(1)
+
+try:
+	import netifaces
+except:
+	FEATURES['netifaces'] = False
+	print "Could not import netifaces, no alternative implemented yet..."
+	print "Please install python-netifaces."
+	sys.exit(1)
+
 # --- Classes ---
 # NullHandler: used to make loggers not output(quiet)
 class NullHandler(logging.Handler):
     def emit(self, record):
-        pass
+       	pass
 
 # Class that handles clients
 class sockServer(threading.Thread):
@@ -560,13 +595,6 @@ argvParser.add_argument('-q','--quiet',
 	action='store_true', 
 	help='Show no output(overrides verbosity).', 
 	default=False)
-
-
-LEVELS = {'debug': logging.DEBUG,
-          'info': logging.INFO,
-          'warn': logging.WARNING,
-          'error': logging.ERROR,
-          'critical': logging.CRITICAL}
 
 #parse args
 args = argvParser.parse_args()
