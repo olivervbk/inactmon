@@ -10,6 +10,6 @@
 
 Note:
 -don't really know if setting icons is needed, I guess they work if they are in the current dir...
--developed in ubuntu 10.10 with some packages like python-impacket and python-libpcap (or similar names...)
+-generally a good idea to run on ubuntu-10.10 with suported libraries..
 
 If your OS is not supported, and is not Windows or Mac, then report in bug report section and I'll take a look...

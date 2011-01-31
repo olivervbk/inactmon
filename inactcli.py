@@ -10,9 +10,15 @@ import socket
 
 import inspect
 
+# FIXME:no need for complicated status button functions
 # FIXME:aboutdialog in appindicator crashes on close
-# FIXME:keep message format synced =/
-# FIXME:use python logging =/ (just dont remember the details..) and remove inspect
+# FIXME:gtk trayicon shows menu on left click =/
+# TODO: implement icon changes, all of them =/
+# TODO: set version variables and improve about dialog
+# TODO: set icon variables
+# TODO: outsource menu creation for gtk
+# TODO: keep message format synced =/
+# TODO: use python logging =/ (just dont remember the details..) and remove inspect
 
 FEATURES = {}
 FEATURES['notify'] = True
@@ -39,7 +45,7 @@ try:
 except:
 	print "Could not import appindicator. Trying fallback..."
 	try:
-		import egg.trayicon
+		import egg.trayicon2
 	except:
 		print "Could not import eggtrayicon. Trying fallback..."
 		FEATURES['tray'] = "gtk"
@@ -50,7 +56,7 @@ else:
 
 try:
 	import gobject
-	import gtk
+	import gtk22
 except:
 	print "Could not load GTK. Trying fallback..."
 	FEATURES['interface'] = False
@@ -69,10 +75,25 @@ class appStatus:
 	status = STATUS_OK
 	tray = None
 
-	def __init__(self,tray):
+	def __init__(self):
+		pass
+	def setTray(self,tray):
 		self.tray = tray
+
 	def getStatus(self):
 		return self.status
+
+	def updateStatusByButton(self):
+			if self.status == appStatus.STATUS_OK:
+				self.setStatus(appStatus.STATUS_DISABLED)
+			if self.status == appStatus.STATUS_DISABLED:
+				self.setStatus(appStatus.STATUS_OK)
+			if self.status == appStatus.STATUS_ERROR:
+				self.setStatus(appStatus.STATUS_RECONNECT)
+			if self.status == appStatus.STATUS_RECONNECT:
+				#do nothing :D
+				pass
+
 	def setStatus(self, status):
 		if self.status == self.STATUS_OK:
 			if status != self.STATUS_RECONNECT:
@@ -109,10 +130,34 @@ def exit_gracefully():
 	print "exiting gracefully..."
 	gtk.main_quit() #w00t!
 
+if FEATURES['interface'] == "gtk":
+	class appNotifier:
+		def __init__(self):
+			if not pynotify.init('Inactcli'):
+				print "error initializing pynotify."
+				exit_gracefully()
+		def showMessage(self,message):
+			notification = pynotify.Notification(
+				"Inactcli",
+				message,
+				"notification-message-email")
+			notification.set_urgency(pynotify.URGENCY_NORMAL)
+			notification.set_hint_string("x-canonical-append","")
+#			notification.attach_to_widget(self)
+			if not notification.show():
+				print "Unable to show notification"
+else:
+	class appNotifier:
+		def __init__(self):
+			print "notifier init: no interface. Falling back to terminal."
+		def showMessage(self,message):
+			print message
+
 class notificationManager(threading.Thread):
 	__name__='notificationManager'
 	server = ''
 	port = ''
+	notifier = None
 
 	def messageParser(self,message):
 		output = None
@@ -154,21 +199,18 @@ class notificationManager(threading.Thread):
 		debug(caller, message,level)
 
 	def __init__(self, socketFile, statusMan):
-		#FIXME:no less obscure place to set this? =/
-		gtk.gdk.threads_init() # this makes gtk to allow threads =/
 		self.debug("init", "info")
-
+	
 		self.socketFile = socketFile
 		self.statusMan = statusMan
+	
+		self.notifier = appNotifier()
+
 		threading.Thread.__init__(self)
 		self.debug("init done","info")
 
 	def run(self):
 		self.debug("run", "info")
-		if not pynotify.init('Inactcli'):
-			debug("Could not init pynotify", "fatal")
-			exit_gracefully()
-		self.debug("Pynotify init successful", "info")
 
 		while(True):
 			try:
@@ -205,15 +247,7 @@ class notificationManager(threading.Thread):
 				continue
 
 			try:
-				notification = pynotify.Notification(
-					"Inactcli",
-					self.messageParser(message),
-					"notification-message-email")
-				notification.set_urgency(pynotify.URGENCY_NORMAL)
-				notification.set_hint_string("x-canonical-append","")
-	#				notification.attach_to_widget(self)
-				if not notification.show():
-					print "Unable to show notification"
+				self.notifier.showMessage(self.messageParser(message))
 			except KeyboardInterrupt:
 				print "notMan:Terminated by user"
 				sock.close()
@@ -290,7 +324,8 @@ if FEATURES['tray'] == 'indicator':
 	class trayIcon:
 		ind = None
 		status_item = None
-		def __init__(self):
+		def __init__(self, statusMan):	
+			self.statusMan = statusMan
 			self.ind = ind = appindicator.Indicator ("inactcli",
 				"inactcli-active",
 				appindicator.CATEGORY_APPLICATION_STATUS)
@@ -331,18 +366,7 @@ if FEATURES['tray'] == 'indicator':
 			self.status_item.set_label(label)
 
 		def status_button(self,widget, event=None):
-			#FIXME:statusMan is actually parent...
-			global statusMan
-			status = statusMan.getStatus()
-			if status == appStatus.STATUS_OK:
-				statusMan.setStatus(appStatus.STATUS_DISABLED)
-			if status == appStatus.STATUS_DISABLED:
-				statusMan.setStatus(appStatus.STATUS_OK)
-			if status == appStatus.STATUS_ERROR:
-				statusMan.setStatus(appStatus.STATUS_RECONNECT)
-			if status == appStatus.STATUS_RECONNECT:
-				#do nothing :D
-				pass
+			self.statusMan.updateStatusByButton()
 
 		def destroy_button(self,widget, event=None):
 			print "Quitting via tray..."
@@ -353,7 +377,8 @@ if FEATURES['tray'] == 'indicator':
 
 elif FEATURES['tray'] == "egg":
 	class trayIcon:
-		def __init__(self):
+		def __init__(self, statusMan):
+			self.statusMan = statusMan
 			self.tray = egg.trayicon.TrayIcon("inactcli")
 
 			eventbox = gtk.EventBox()
@@ -375,8 +400,7 @@ elif FEATURES['tray'] == "egg":
 			menu.append(menuitem_exit)
 			menuitem_about.connect("activate", self.aboutdialog)
 			menuitem_status.connect("activate", self.status_button)
-			#FIXME:exit_gracefully() >_>
-			menuitem_exit.connect("activate", lambda w: gtk.main_quit())
+			menuitem_exit.connect("activate", self.destroy_button)
 			menu.show_all()
 		    
 		def icon_clicked(self, widget, event):
@@ -387,18 +411,10 @@ elif FEATURES['tray'] == "egg":
 			aboutDialog()
 
 		def status_button(self,widget, event=None):
-			#FIXME:statusMan is actually parent...
-			global statusMan
-			status = statusMan.getStatus()
-			if status == appStatus.STATUS_OK:
-				statusMan.setStatus(appStatus.STATUS_DISABLED)
-			if status == appStatus.STATUS_DISABLED:
-				statusMan.setStatus(appStatus.STATUS_OK)
-			if status == appStatus.STATUS_ERROR:
-				statusMan.setStatus(appStatus.STATUS_RECONNECT)
-			if status == appStatus.STATUS_RECONNECT:
-				#do nothing :D
-				pass
+			self.statusMan.updateStatusByButton()
+
+		def destroy_button(self,widget,event=None):
+			exit_gracefully()
 
 		def setIcon(self, status, icon):
 			#TODO:implement
@@ -407,20 +423,54 @@ elif FEATURES['tray'] == "egg":
 			self.menuitem_status.set_label(label)
 		
 elif FEATURES['tray'] == "gtk":
-	class trayIcon:
-		def __init__(self):
-			print "class trayIcon for gtk is not implemented yet..."
-			#TODO:implement
+	class trayIcon(gtk.StatusIcon):
+		def __init__(self, statusMan):
+			self.statusMan = statusMan
+			gtk.StatusIcon.__init__(self)
+			
+			self.set_from_file("eye-version3-active.svg")
+			self.set_tooltip('Tracker Desktop Search')
+			self.set_visible(True)
+
+			self.menu = menu = gtk.Menu()
+
+			self.status_item = status_item = gtk.MenuItem("Disable")
+			status_item.connect("activate", self.status_button, "status clicked")
+			menu.append(status_item)
+
+			about_item = gtk.MenuItem("About")
+			about_item.connect("activate", self.aboutdialog,"about")
+			menu.append(about_item)
+
+			quit_item = gtk.MenuItem("Quit")
+			quit_item.connect("activate", self.destroy_button, "file.quit")
+			menu.append(quit_item)
+			menu.show_all()
+
+			self.connect('popup-menu', self.icon_clicked)
+
+		def icon_clicked(self, status, button, time):
+			self.menu.popup(None, None, None, button, time)
+
+		def aboutdialog(self, widget, event=None):
+			aboutDialog()
+
+		def status_button(self,widget, event=None):
+			self.statusMan.updateStatusByButton()
+
+		def destroy_button(self,widget,event=None):
+			exit_gracefully()
+
 		def setIcon(self, status, icon):
 			#TODO:implement
 			pass
 		def setActionLabel(self,label):
-			#TODO:implement
-			pass
+			self.status_item.set_label(label)
 
 else:
 	class trayIcon:
-		def __init__(self):
+		def __init__(self,statusMan):
+			self.statusMan = statusMan
 			print "class trayIcon for no interface loaded..."
 		def setIcon(self, status, icon):
 			#TODO:implement
@@ -429,9 +479,14 @@ else:
 			#TODO:implement
 			print "New label:"+label
 
-tray = trayIcon()
 
-statusMan = appStatus(tray)
+
+statusMan = appStatus()
+tray = trayIcon(statusMan)
+statusMan.setTray(tray)
+
+if FEATURES['interface'] == "gtk":
+	gtk.gdk.threads_init() # this makes gtk to allow threads =/
 
 debug("main","Threading notificationManager","info")
 notMan = notificationManager( args.socketFile, statusMan)
@@ -439,7 +494,13 @@ notMan.setDaemon(True)
 notMan.start()
 
 try:
-	gtk.main()
+	if FEATURES['interface'] == "gtk":
+		gtk.main()
+	else:
+		#just sleep?
+		while(True):
+			time.sleep(50)
+			#print "."
 except:
 	print "main:Terminated! Error:",sys.exc_info()[0]
 	#exit_gracefully()
