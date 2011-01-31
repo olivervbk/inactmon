@@ -27,6 +27,17 @@ FEATURES['tray'] = None
 
 DEFAULT_SOCKET_FILE = '/tmp/inactmon.sock'
 
+ICONS = {}
+ICONS['active'] = {}
+ICONS['active']['filename'] = "eye-version3-active.svg"
+ICONS['active']['name'] = "inactcli-active"
+ICONS['disabled']={}
+ICONS['disabled']['filename'] = "eye-version3-passive.svg"
+ICONS['disabled']['name'] = "inactcli-passive"
+ICONS['error']={}
+ICONS['error']['filename'] = "eye-version3-attention.svg"
+ICONS['error']['name'] = "inactcli-attention"
+
 try:
 	import argparse
 except:
@@ -84,15 +95,15 @@ class appStatus:
 		return self.status
 
 	def updateStatusByButton(self):
-			if self.status == appStatus.STATUS_OK:
-				self.setStatus(appStatus.STATUS_DISABLED)
-			if self.status == appStatus.STATUS_DISABLED:
-				self.setStatus(appStatus.STATUS_OK)
-			if self.status == appStatus.STATUS_ERROR:
-				self.setStatus(appStatus.STATUS_RECONNECT)
-			if self.status == appStatus.STATUS_RECONNECT:
-				#do nothing :D
-				pass
+		if self.status == appStatus.STATUS_OK:
+			self.setStatus(appStatus.STATUS_DISABLED)
+		elif self.status == appStatus.STATUS_DISABLED:
+			self.setStatus(appStatus.STATUS_OK)
+		elif self.status == appStatus.STATUS_ERROR:
+			self.setStatus(appStatus.STATUS_RECONNECT)
+		elif self.status == appStatus.STATUS_RECONNECT:
+			#do nothing :D
+			pass
 
 	def setStatus(self, status):
 		if self.status == self.STATUS_OK:
@@ -110,15 +121,15 @@ class appStatus:
 		self.updateMenu()
 	def updateMenu(self):
 		if self.status == self.STATUS_OK:
-			self.tray.setIcon(icon = None, status = "active")
+			self.tray.setIcon(icon = "active", status = "active")
 			self.tray.setActionLabel(label = "Disable")
 		if self.status == self.STATUS_DISABLED:
 			#FIXME:set icon here...
-			self.tray.setIcon(icon = None, status = "attention")
+			self.tray.setIcon(icon = "disabled", status = "attention")
 			self.tray.setActionLabel(label = "Enable")
 		if self.status == self.STATUS_ERROR:
 			#FIXME:set icon here...
-			self.tray.setIcon(icon = None, status = "attention")
+			self.tray.setIcon(icon = "error", status = "attention")
 			self.tray.setActionLabel(label = "Reconnect")
 		if self.status == self.STATUS_RECONNECT:
 			#FIXME:set icon here...
@@ -350,6 +361,11 @@ if FEATURES['tray'] == 'indicator':
 			ind.set_menu(menu)
 		
 		def setIcon(self, status, icon):
+			global ICONS
+
+			if icon is not None:
+				self.ind.set_attention_icon(ICONS[icon]['name'])
+
 			if status == "active":
 				status = appindicator.STATUS_ACTIVE
 			elif status == "attention":
@@ -358,11 +374,6 @@ if FEATURES['tray'] == 'indicator':
 				print "Unknown status: "+status
 				return
 			self.ind.set_status(status)
-
-			if icon is not None:
-				self.ind.set_attention_icon(icon)
-
-			self.ind.set_attention_icon(icon)
 
 		def setActionLabel(self,label):
 			self.status_item.set_label(label)
