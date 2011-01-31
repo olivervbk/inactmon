@@ -41,11 +41,11 @@ except:
 	sys.exit(1)
 
 try:
-	import appindicator2
+	import appindicator
 except:
 	print "Could not import appindicator. Trying fallback..."
 	try:
-		import egg.trayicon2
+		import egg.trayicon
 	except:
 		print "Could not import eggtrayicon. Trying fallback..."
 		FEATURES['tray'] = "gtk"
@@ -56,7 +56,7 @@ else:
 
 try:
 	import gobject
-	import gtk22
+	import gtk
 except:
 	print "Could not load GTK. Trying fallback..."
 	FEATURES['interface'] = False
@@ -361,6 +361,8 @@ if FEATURES['tray'] == 'indicator':
 
 			if icon is not None:
 				self.ind.set_attention_icon(icon)
+
+			self.ind.set_attention_icon(icon)
 
 		def setActionLabel(self,label):
 			self.status_item.set_label(label)
