@@ -83,11 +83,44 @@ class appLogger:
 # Handles parsing of headers to send to clients, didn't need to be a class but probably better so.
 class netMonMessenger:
 	logger = None
-	def __init__(self):
-		self.logger = logging.getLogger('console.netMon.netMonMessenger')
+	def __init__(self,logger):
+		self.logger = logger.newLogger('netMonMessenger')
 		self.logger.debug("init")
 	
-	def parse(self,payload,name):
+	def decode(self,message):
+		output = None
+		messages = message.split('\n')
+		for m in messages:
+			fields = m.split(':')
+			auxout = 'unknown'
+
+			if fields[0] == 'tcp':
+				if fields[1] == 'syn':
+					auxout = 'Connection from '+fields[2]+':'+fields[3]+' on port '+fields[5]
+				if fields[2] == 'ack':
+					auxout = 'Connected to '+fields[2]+':'+fields[3]+' on port '+fields[4]
+
+			if fields[0] == 'udp':
+				auxout = 'Datagram from '+fields[1]+' on port '+fields[2]
+
+			if fields[0] == 'icmp':
+				if fields[1] == 'echo':
+					auxout = 'Ping request from '+fields[2]+' to '+fields[3]
+				if fields[2] == 'reply':
+					auxout = 'Ping response to '+fields[3]
+
+			if fields[0] == 'err':
+				auxout = 'Error: '+fields[1]
+
+			if output is not None:
+				output += '\n'
+			else:
+				output = ''
+			output += auxout
+			
+		return output
+	
+	def encode(self,payload,name):
 		self.logger.debug("got payload from "+name)
 		rip = ImpactDecoder.EthDecoder().decode(payload)
 

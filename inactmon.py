@@ -253,7 +253,7 @@ class netMon:
 						print "cap.next() exception:"+str(sys.exc_info()[0])
 						exit_gracefully()
 
-					message = self.messenger.parse(payload, self.name)
+					message = self.messenger.encode(payload, self.name)
 					self.logger.debug("msg rcvd: "+str(message))
 					self.myqueue.put(message)
 
@@ -307,7 +307,7 @@ class netMon:
 
 	def run(self):
 		self.logger.debug("run")
-		messenger = netMonMessenger()
+		messenger = netMonMessenger(self.logger)
 
 		self.logger.debug("starting filter engines")
 		for name in filters:

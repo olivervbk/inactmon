@@ -10,7 +10,7 @@ import socket
 import logging
 
 import inactlib
-from inactlib import appLogger
+from inactlib import appLogger, netMonMessenger
 
 
 # FIXME:no need for complicated status button functions
@@ -173,39 +173,6 @@ class notificationManager(threading.Thread):
 	port = ''
 	notifier = None
 
-	def messageParser(self,message):
-		output = None
-		messages = message.split('\n')
-		for m in messages:
-			fields = m.split(':')
-			auxout = 'unknown'
-
-			if fields[0] == 'tcp':
-				if fields[1] == 'syn':
-					auxout = 'Connection from '+fields[2]+':'+fields[3]+' on port '+fields[5]
-				if fields[2] == 'ack':
-					auxout = 'Connected to '+fields[2]+':'+fields[3]+' on port '+fields[4]
-
-			if fields[0] == 'udp':
-				auxout = 'Datagram from '+fields[1]+' on port '+fields[2]
-
-			if fields[0] == 'icmp':
-				if fields[1] == 'echo':
-					auxout = 'Ping request from '+fields[2]+' to '+fields[3]
-				if fields[2] == 'reply':
-					auxout = 'Ping response to '+fields[3]
-
-			if fields[0] == 'err':
-				auxout = 'Error: '+fields[1]
-
-			if output is not None:
-				output += '\n'
-			else:
-				output = ''
-			output += auxout
-			
-		return output
-
 	def __init__(self, socketFile, statusMan, logger):
 		self.logger = logger.newLogger('notMan')
 		self.logger.debug("init")
@@ -214,6 +181,8 @@ class notificationManager(threading.Thread):
 		self.statusMan = statusMan
 	
 		self.notifier = appNotifier()
+		
+		self.parser = netMonMessenger(logger)
 
 		threading.Thread.__init__(self)
 		self.logger.debug("init done")
@@ -230,7 +199,7 @@ class notificationManager(threading.Thread):
 				#FIXME:try to reconnect automatically every x seconds ?
 				print "error connecting to server, waiting for reconnect signal"
 				while(self.statusMan.getStatus() != appStatus.STATUS_RECONNECT):
-					time.sleep(0.2)
+					time.sleep(0.2) #FIXME: waits for status updates...
 				continue
 			except:
 				print "Unknown Error:",sys.exc_info()[0]
@@ -256,7 +225,7 @@ class notificationManager(threading.Thread):
 				continue
 
 			try:
-				self.notifier.showMessage(self.messageParser(message))
+				self.notifier.showMessage(self.parser.decode(message))
 			except KeyboardInterrupt:
 				print "notMan:Terminated by user"
 				sock.close()
@@ -268,12 +237,6 @@ class notificationManager(threading.Thread):
 				break
 		print "...got here?"
 		self.run()
-
-#FIXME:this must go
-def debug(caller,message,level):
-	global args
-	if args.verbose:
-		print level+':'+str(caller)+':'+str(message)
 
 parser = argparse.ArgumentParser(description='Incoming Netword Activity Client.')
 
@@ -302,9 +265,9 @@ parser.add_argument('-v','--verbose',
 parser.add_argument('-q','--quiet', 
 	required=False, 
 	dest='quiet', 
-	action='store_true', 
+	action='store_true',
 	help='Show no output(overrides verbosity)', 
-	default=True)
+	default=False)
 
 
 
@@ -314,12 +277,10 @@ args = parser.parse_args()
 logger = appLogger(args.quiet, args.verbose, None)
 
 if FEATURES['interface'] == "gtk":
-	class aboutDialog:
-		logParent = None
-		def __init__(self, logger):
-			self.logger = logger.newLogger('aboutDialog-gtk')
+	def aboutDialog(widget, event=None):
+#			self.logger = logger.newLogger('aboutDialog-gtk')
 			
-			self.logger.debug('init')
+#			self.logger.debug('init')
 			aboutdialog = gtk.AboutDialog()
 			
 			aboutdialog.set_name("Inactmon-cli")
@@ -328,14 +289,14 @@ if FEATURES['interface'] == "gtk":
 			aboutdialog.set_comments("Shows notifications about incomming activity based on pcap rules.")
 			aboutdialog.set_authors(["Oliver Kuster"])
 			aboutdialog.set_logo(gtk.gdk.pixbuf_new_from_file_at_size("eye-version3-active.svg",100,100))
-			self.logger.debug('done setting values, running')
+#			self.logger.debug('done setting values, running')
 			
 		
 			aboutdialog.run()
-			self.logger.debug('done running, destroying')
+#			self.logger.debug('done running, destroying')
 			
 			aboutdialog.destroy()
-			self.logger.debug('done')
+#			self.logger.debug('done')
 else:
 	class aboutDialog:
 		def __init__(self, logger):
@@ -365,7 +326,7 @@ if FEATURES['tray'] == 'indicator':
 			menu.append(status_item)
 
 			about_item = gtk.MenuItem("About")
-			about_item.connect("activate", self.about_button,"about")
+			about_item.connect("activate", aboutDialog,"about")
 			menu.append(about_item)
 
 			quit_item = gtk.MenuItem("Quit")
@@ -401,7 +362,12 @@ if FEATURES['tray'] == 'indicator':
 			exit_gracefully()
 
 		def about_button(self,widget, event=None):
-			aboutDialog()
+			try:
+				aboutDialog(self.logger)
+			except:
+				print "error showing about dialog:",sys.exc_info()[0]
+			else:
+				print "about-dialog:done"
 
 elif FEATURES['tray'] == "egg":
 	class trayIcon:
@@ -437,7 +403,7 @@ elif FEATURES['tray'] == "egg":
 				self.menu.popup(None, None, None, event.button, event.time, self.tray)
 		    
 		def aboutdialog(self, widget):
-			aboutDialog()
+			aboutDialog(self.logger)
 
 		def status_button(self,widget, event=None):
 			self.statusMan.updateStatusByButton()
@@ -460,7 +426,7 @@ elif FEATURES['tray'] == "gtk":
 			gtk.StatusIcon.__init__(self)
 			
 			self.set_from_file("eye-version3-active.svg")
-			self.set_tooltip('Tracker Desktop Search')
+			self.set_tooltip('Inactcli')
 			self.set_visible(True)
 
 			self.menu = menu = gtk.Menu()
@@ -484,7 +450,7 @@ elif FEATURES['tray'] == "gtk":
 			self.menu.popup(None, None, None, button, time)
 
 		def aboutdialog(self, widget, event=None):
-			aboutDialog()
+			aboutDialog(self.logger)
 
 		def status_button(self,widget, event=None):
 			self.statusMan.updateStatusByButton()
@@ -522,7 +488,7 @@ statusMan.setTray(tray)
 if FEATURES['interface'] == "gtk":
 	gtk.gdk.threads_init() # this makes gtk to allow threads =/
 
-debug("main","Threading notificationManager","info")
+logger.info("Threading notificationManager")
 notMan = notificationManager( args.socketFile, statusMan, logger)
 notMan.setDaemon(True)
 notMan.start()
