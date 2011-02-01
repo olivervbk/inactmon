@@ -7,8 +7,11 @@ import sys
 import time
 import datetime
 import socket
+import logging
 
-import inspect
+import inactlib
+from inactlib import appLogger
+
 
 # FIXME:no need for complicated status button functions
 # FIXME:aboutdialog in appindicator crashes on close
@@ -18,7 +21,7 @@ import inspect
 # TODO: set icon variables
 # TODO: outsource menu creation for gtk
 # TODO: keep message format synced =/
-# TODO: use python logging =/ (just dont remember the details..) and remove inspect
+# TODO: improve logging
 
 FEATURES = {}
 FEATURES['notify'] = True
@@ -26,6 +29,7 @@ FEATURES['interface'] = None
 FEATURES['tray'] = None
 
 DEFAULT_SOCKET_FILE = '/tmp/inactmon.sock'
+DEFAULT_VERBOSE_LEVEL = 'warn'
 
 ICONS = {}
 ICONS['active'] = {}
@@ -165,7 +169,6 @@ else:
 			print message
 
 class notificationManager(threading.Thread):
-	__name__='notificationManager'
 	server = ''
 	port = ''
 	notifier = None
@@ -202,15 +205,10 @@ class notificationManager(threading.Thread):
 			output += auxout
 			
 		return output
-	
 
-	def debug(self,message, level):
-		classname = self.__name__
-		caller = '('+classname+')'+inspect.stack()[1][3]
-		debug(caller, message,level)
-
-	def __init__(self, socketFile, statusMan):
-		self.debug("init", "info")
+	def __init__(self, socketFile, statusMan, logger):
+		self.logger = logger.newLogger('notMan')
+		self.logger.debug("init")
 	
 		self.socketFile = socketFile
 		self.statusMan = statusMan
@@ -218,10 +216,10 @@ class notificationManager(threading.Thread):
 		self.notifier = appNotifier()
 
 		threading.Thread.__init__(self)
-		self.debug("init done","info")
+		self.logger.debug("init done")
 
 	def run(self):
-		self.debug("run", "info")
+		self.logger.debug("run")
 
 		while(True):
 			try:
@@ -242,7 +240,7 @@ class notificationManager(threading.Thread):
 		#if status was reconnecting... 
 		self.statusMan.setStatus(appStatus.STATUS_OK)
 
-		self.debug("Connected to server", "info")
+		self.logger.debug("Connected to server")
 		while True:
 			message = sock.recv(1024)
 		
@@ -296,46 +294,63 @@ parser.add_argument('-f', '--socketFile',
 
 parser.add_argument('-v','--verbose', 
 	required=False, 
-	dest='verbose', 
-	action='store_true', 
-	help='More output.')
+	dest='verbose',  
+	type=str,
+	default=DEFAULT_VERBOSE_LEVEL,
+	help='More output(debug|info|warn|error|critical) Warn is default.')
 
 parser.add_argument('-q','--quiet', 
 	required=False, 
-	dest='verbose', 
-	action='store_false', 
-	help='Show less output(default)', 
+	dest='quiet', 
+	action='store_true', 
+	help='Show no output(overrides verbosity)', 
 	default=True)
 
 
 
 
 args = parser.parse_args()
-verbose = args.verbose
+
+logger = appLogger(args.quiet, args.verbose, None)
 
 if FEATURES['interface'] == "gtk":
 	class aboutDialog:
-		def __init__(self):
+		logParent = None
+		def __init__(self, logger):
+			self.logger = logger.newLogger('aboutDialog-gtk')
+			
+			self.logger.debug('init')
 			aboutdialog = gtk.AboutDialog()
+			
 			aboutdialog.set_name("Inactmon-cli")
 			aboutdialog.set_version("1.0")
 			aboutdialog.set_copyright("Don't redistribute! :P")
 			aboutdialog.set_comments("Shows notifications about incomming activity based on pcap rules.")
 			aboutdialog.set_authors(["Oliver Kuster"])
 			aboutdialog.set_logo(gtk.gdk.pixbuf_new_from_file_at_size("eye-version3-active.svg",100,100))
+			self.logger.debug('done setting values, running')
+			
 		
 			aboutdialog.run()
+			self.logger.debug('done running, destroying')
+			
 			aboutdialog.destroy()
+			self.logger.debug('done')
 else:
 	class aboutDialog:
-		def __init__(self):
+		def __init__(self, logger):
+			self.logger = logger.newLogger('aboutDialog-none')
+			self.logger.debug('init')
 			print "interface not specified..."
+			self.logger.debug('done')
 
 if FEATURES['tray'] == 'indicator':
 	class trayIcon:
 		ind = None
 		status_item = None
-		def __init__(self, statusMan):	
+		def __init__(self, statusMan,logger):	
+			self.logger = logger.newLogger('trayIcon-indicator')
+			
 			self.statusMan = statusMan
 			self.ind = ind = appindicator.Indicator ("inactcli",
 				"inactcli-active",
@@ -390,7 +405,8 @@ if FEATURES['tray'] == 'indicator':
 
 elif FEATURES['tray'] == "egg":
 	class trayIcon:
-		def __init__(self, statusMan):
+		def __init__(self, statusMan, logger):
+			self.logger = logger.newLogger('trayIcon-egg')
 			self.statusMan = statusMan
 			self.tray = egg.trayicon.TrayIcon("inactcli")
 
@@ -437,7 +453,9 @@ elif FEATURES['tray'] == "egg":
 		
 elif FEATURES['tray'] == "gtk":
 	class trayIcon(gtk.StatusIcon):
-		def __init__(self, statusMan):
+		def __init__(self, statusMan, logger):
+			self.logger = logger.newLogger('trayIcon-gtk')
+			
 			self.statusMan = statusMan
 			gtk.StatusIcon.__init__(self)
 			
@@ -482,7 +500,9 @@ elif FEATURES['tray'] == "gtk":
 
 else:
 	class trayIcon:
-		def __init__(self,statusMan):
+		def __init__(self,statusMan, logger):
+			self.logger = logger.newLogger('trayIcon-none')
+			
 			self.statusMan = statusMan
 			print "class trayIcon for no interface loaded..."
 		def setIcon(self, status, icon):
@@ -494,15 +514,16 @@ else:
 
 
 
+#FIXME:Fruit salad..
 statusMan = appStatus()
-tray = trayIcon(statusMan)
+tray = trayIcon(statusMan, logger)
 statusMan.setTray(tray)
 
 if FEATURES['interface'] == "gtk":
 	gtk.gdk.threads_init() # this makes gtk to allow threads =/
 
 debug("main","Threading notificationManager","info")
-notMan = notificationManager( args.socketFile, statusMan)
+notMan = notificationManager( args.socketFile, statusMan, logger)
 notMan.setDaemon(True)
 notMan.start()
 
