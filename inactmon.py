@@ -7,11 +7,19 @@ import stat
 import time
 import datetime
 
+import argparse
+
 import copy
-import ConfigParser
 import socket
 import threading
-import Queue
+
+if sys.version_info >= (3, 0):
+	from queue import Queue
+elif sys.version_info >= (2,0):
+	from Queue import Queue
+else:
+	print ("Python version unknown: %s" % sys.version_info)
+	sys.exit(1)
 
 #FIXME: not really needed anymore
 import logging
@@ -25,23 +33,17 @@ import logging
 #FIXME:do daemonic threads damage non-renewable system resources?(inet sockets?)(pcap resources?)
 
 # Import needed libraries
-try:
-	import pcapy
-except:
-	print "Error: could not import pcapy. Please install python-pcapy."
-	sys.exit(1)
 
-#FIXME: not really needed HERE anymore
-try:
-	import impacket
-	from impacket import ImpactDecoder
-except:
-	print "Error: could not import impacket. Please install python-impacket."
-	sys.exit(1)
+import pcapy
+import impacket
+from impacket import ImpactDecoder
 
 # Import custom lib, must be done after ImpactDecoder and Logging check
 import inactlib
 from inactlib import appLogger, netMonMessenger
+
+import argparse
+import netifaces
 
 # --- Default Values ---
 DEFAULT = {}
@@ -54,27 +56,7 @@ DEFAULT['log'] = 'inactmon.log'#FIXME:/var/log/inactmon.log
 
 CURRENT = copy.deepcopy(DEFAULT) #damned objects...
 
-# --- Enabled features ---
-FEATURES = {}
-FEATURES['arguments'] = True
-#FEATURES['logging']   = True
-FEATURES['netifaces'] = True
-
-try:
-	import argparse
-except:
-	FEATURES['arguments'] = False
-	print "Could not import arparse, no alternative implemented yet..."
-	print "Please install python-argparser."
-	sys.exit(1)
-
-try:
-	import netifaces
-except:
-	FEATURES['netifaces'] = False
-	print "Could not import netifaces, no alternative implemented yet..."
-	print "Please install python-netifaces."
-	sys.exit(1)
+import ConfigParser
 
 # --- Classes ---
 # Class that handles clients
@@ -162,7 +144,7 @@ class sockServer(threading.Thread):
 		except OSError:
 		    pass
 		except:
-			print "os.remove exception:"+sys.exc_info()[0]
+			print ("os.remove exception:"+sys.exc_info()[0] )
 			exit_gracefully()
 
 		self.sock.bind(self.sockFile)
@@ -176,7 +158,7 @@ class sockServer(threading.Thread):
 				connection, address = self.sock.accept()
 				self.cliHandler.append(connection)
 			except:
-				print "socket loop exception:"+str(sys.exc_info()[0])
+				print ("socket loop exception:"+str(sys.exc_info()[0]))
 				break
 
 		#The following will probably never run since sock.accept() blocks and this thread is 'killed' on exit
@@ -223,16 +205,16 @@ class netMon:
 
 			cap = pcapy.open_live(self.iface, 1500, 0, 0)
 			if pcapy.DLT_EN10MB != cap.datalink():
-				print "Interface is not ethernet based. Quitting..."
-				exit_gracefully()
+				print ("Interface is not ethernet based. Quitting...")
+				#exit_gracefully() #FIXME:uncoment
 			
-			#print "%s: net=%s, mask=%s, addrs=%s" % (self.args.interface, cap.getnet(), cap.getmask(), str(self.ipAddresses))
+			print ("%s: net=%s, mask=%s, addrs=%s" % (self.iface, cap.getnet(), cap.getmask(), str(self.ipAddresses)) )
 
 			try:
 				self.rule = self.attributes['rule']
 			except KeyError:
 				self.type = self.attributes['type']
-				print "type = "+self.type+" not implemented..."
+				print ("type = "+self.type+" not implemented...")
 				return
 
 			
@@ -241,16 +223,16 @@ class netMon:
 				try:
 					cap.setfilter(self.rule)
 				except:
-					print "Unable to set rule '"+self.rule+"' for filter '"+self.name+"'"
+					print ("Unable to set rule '"+self.rule+"' for filter '"+self.name+"'")
 					exit_gracefully()
 
 				self.logger.info('Waiting for packet...')
 				while True:
 					try:
-	#this may block
+						#this may block
 						(header, payload) = cap.next()
 					except:
-						print "cap.next() exception:"+str(sys.exc_info()[0])
+						print ("cap.next() exception:"+str(sys.exc_info()[0]))
 						exit_gracefully()
 
 					message = self.messenger.encode(payload, self.name)
@@ -258,6 +240,8 @@ class netMon:
 					self.myqueue.put(message)
 
 				self.logger.info("stopping...")
+			else:
+				self.logger.warn('Rule was empty?')
 
 		def checkInterface(self, iface):
 			ipAddresses = [] 
@@ -266,15 +250,15 @@ class netMon:
 			try:
 				ifs = pcapy.findalldevs()
 			except pcapy.PcapError:
-				print "Unable to get interfaces. Are you running as root?"
+				print ("Unable to get interfaces. Are you running as root?")
 				exit_gracefully()
 
 			if 0 == len(ifs):
-				print "No interfaces available."
+				print ("No interfaces available.")
 				exit_gracefully()
 
 			if not iface in ifs:
-				print "Interface '%s' not found." % (iface)
+				print ("Interface '%s' not found." % (iface))
 				exit_gracefully()
 
 			for ifaceName in netifaces.interfaces():
@@ -287,8 +271,8 @@ class netMon:
 							ipAddresses.append(address['addr'])
 				except KeyError:
 					if iface == ifaceName:
-						print "Interface '%s' is down." % (iface)
-						exit_gracefully()
+						print ("Interface '%s' is down." % (iface))
+						#exit_gracefully() #FIXME:uncoment
 			return ipAddresses
 	args = None
 	ipAddresses = None
@@ -328,9 +312,9 @@ def signal_handler(signal_recv, frame):
 
 def exit_gracefully():
 #FIXME:remove these prints
-	print "\nexiting..."
+	print ("\nexiting...")
 	logging.shutdown()
-	print "exit_gracefully is done!"
+	print ("exit_gracefully is done!")
 
 #FIXME:socket.accept and pcapy.next are blocking... AND signals are only treated in the main thread..,
 #	this could lead to problems when dealing with non reusable system resources(like inet sockets =/)
@@ -347,7 +331,7 @@ def exit_gracefully():
 
 def reload_config():
 #TODO:implementin
-	print "\nreload config"
+	print ("\nreload config")
 	
 #FIXME:separate the rest into MAIN
 
@@ -366,78 +350,6 @@ except ValueError:
 		pass
 if(optionNum != -1):
 	CURRENT['config'] = sys.argv[optionNum+1]
-
-#TODO:separate configParser to function? =/
-#receives configParser and returns filter?
-
-#Load config file
-configParser = ConfigParser.ConfigParser()
-#FIXME:try!
-try:
-	configParser.readfp(open(CURRENT['config']))
-except:
-	print "Could not read configuration:"+str(sys.exc_info()[0])
-	sys.exit(0)
-	
-#FIXME:put somewhere
-allowedConfigIndexes = ['socket file', 'log', 'max clients', 'debug', 'verbose']
-
-filters = {}
-
-try:
-	configParser.sections().index('global')
-except ValueError:
-	pass
-else:
-	for item in configParser.items('global'):
-		print item
-		try:
-			allowedConfigIndexes.index(item[0])
-		except ValueError:
-			continue
-
-		if item[0] == 'debug':
-			CURRENT[item[0]] = configParser.getboolean('global', item[0])
-		else:
-			CURRENT[item[0]] = item[1]
-
-	for section in configParser.sections():
-		if section == 'global':
-			continue
-			
-		filters[section] = {}
-
-		try:
-			iface = configParser.get(section, 'iface')
-		except ConfigParser.NoOptionError:
-			print "Missing iface information from filter:"+section
-			sys.exit(0)
-		except:
-			print "Unknown error reading iface from filter: "+section+": "+str(sys.exc_info()[0])
-			sys.exit(0)
-		filters[section]['iface'] = iface 
-			
-		try:
-			rule = configParser.get(section, 'rule')
-		except ConfigParser.NoOptionError:
-			try:
-				filterType = configParser.get(section, 'type')
-
-			except ConfigParser.NoOptionError:
-				print "missing rule or type in filter "+section
-				sys.exit(0)
-
-			except:
-				print "Unknown error reading type from filter: "+section+": "+str(sys.exc_info()[0])
-				sys.exit(1)
-			filters[section]['type'] = filterType
-
-		except:
-			print "Unknown error reading rule from filter: "+section+": "+str(sys.exc_info()[0])
-			sys.exit(1)
-		else:
-			filters[section]['rule'] = rule
-		
 
 #Set argument parsing
 argvParser = argparse.ArgumentParser(description='Monitor connection attempts.')
@@ -510,7 +422,7 @@ if args.debug is None or args.debug is not True:
 		pid = os.fork()
 
 	except:
-		print "Could not fork:"+str(sys.exc_info()[0]) #FIXME: should be logger?
+		print ("Could not fork:"+str(sys.exc_info()[0]) ) #FIXME: should be logger?
 		sys.exit(1)
 
 	if pid != 0:
@@ -518,7 +430,7 @@ if args.debug is None or args.debug is not True:
 		sys.exit(0)
 
 #start queue
-myqueue = Queue.Queue()
+myqueue = Queue()
 
 #start threads
 logger.debug('Starting server')
@@ -527,17 +439,27 @@ sockServer_thread.setDaemon(True)
 sockServer_thread.start()
 
 logger.debug('Starting filters')
+
+mFilter = {}
+mFilter['rule'] = 'icmp'
+mFilter['type'] = 'asdType'
+mFilter['iface'] = 'wlan0'
+
+filters = {}
+filters['asdName'] = mFilter
+
+
 netMon(myqueue,filters, logger)
 
 #FIXME:should set main thread to do something useful? sockServer? (which blocks?)
 while 1:
 	try:
 		time.sleep(50)
-		print "." #FIXME:remove
+		print (".") #FIXME:remove
 	except SystemExit:
 		break
 	except:
-		print "Main (useless) loop end:"+str(sys.exc_info()[0]) #FIXME:as logger?
+		print ("Main (useless) loop end:"+str(sys.exc_info()[0]) ) #FIXME:as logger?
 		break
 logger.debug('Main Thread ended.')
 sys.exit(0)
