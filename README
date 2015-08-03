@@ -1,13 +1,21 @@
 Developed by: Oliver Kuster
 
-Need to put a copy of the license here...
+Don't redistribute for money.
+Don't redistribute without all original files
+Yada-yada-yada...
 
-Or:
--Don't redistribute for money
--Don't redistribute without all original files
--Don't ... Just ... Don't
-
-This server-client app runs filters(pcap) and reports results to users by notifications...
+This server-client app runs filters(pcap) and reports results to users by notifications(libnotify)...
 Still very limited and buggy, so beware!
 
-If you are still thankful, buy me a distilled alcoholic drink... or donate...
+If you are still thankful, buy me a distilled alcoholic drink... or just donate...
+
+Dependencies:
+python-argparse
+python-netifaces
+python-pcapy
+python-impacket
+python-notify
+python-appindicator | python-eggtrayicon | just pygtk | none at all, text only
+
+Note:
+I'm working on some fallback compat.
