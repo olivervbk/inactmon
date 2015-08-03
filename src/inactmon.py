@@ -13,7 +13,8 @@ import argparse
 
 import copy
 import socket
-import threading
+from threading import Thread
+import imp
 
 if sys.version_info >= (3, 0):
 	from queue import Queue
@@ -42,7 +43,7 @@ from impacket import ImpactDecoder
 
 # Import custom lib, must be done after ImpactDecoder and Logging check
 import inactlib
-from inactlib import appLogger, netMonMessenger
+from inactlib import AppLogger, NetMonMessenger
 
 import argparse
 import netifaces
@@ -62,11 +63,11 @@ import ConfigParser
 
 # --- Classes ---
 # Class that handles clients
-class sockServer(threading.Thread):
+class sockServer(Thread):
 	#This subclass handles the client comunication in a separate thread. Handles all clients,
 	#not just one per instance...
 	#Less elegant, though easier than the alternative, multiple inter-thread queues...
-	class clientsHandler(threading.Thread):
+	class clientsHandler(Thread):
 		queue = None
 		clients = []
 		logger = None
@@ -74,7 +75,7 @@ class sockServer(threading.Thread):
 		def __init__(self, queue, logger):
 			self.queue = queue
 			self.logger = logger.newLogger('clientsHandler')
-			threading.Thread.__init__(self)
+			Thread.__init__(self)
 			self.logger.debug("init:done")
 
 		def run(self):
@@ -132,7 +133,7 @@ class sockServer(threading.Thread):
 		self.cliHandler.setDaemon(True)
 		self.cliHandler.start()
 
-		threading.Thread.__init__(self)
+		Thread.__init__(self)
 
 		self.logger.debug("init:done")
 		#self.run() DO NOT
@@ -173,6 +174,7 @@ class netMon:
 	args = None
 	ipAddresses = None
 	logger = None
+	myqueue = None
 
 	def __init__(self,myqueue,filters, logger):
 		self.myqueue = myqueue
@@ -218,199 +220,82 @@ class netMon:
 
 	def run(self):
 		self.logger.debug("run")
-		messenger = netMonMessenger(self.logger)
+		messenger = NetMonMessenger.NetMonMessenger(self.logger)
 
 		iface = "wlan0"
 		ipAddresses = self.checkInterface(iface)
 
 		self.logger.debug("starting filter engines")
 		for name in self.filters:
+			self.logger.debug("creating filter:"+name)
 
-			self.logger.debug("got:"+name)
+			#create logger
 			childLogger = self.logger.newLogger(name)
 
-			clazz = globals()[name]
+			## this would be used if the class were defined in here...
+			#clazz = globals()[name]
+			module = loadModule(name, "./modules/"+name+".py")
+			clazz = getattr(module, name)
+			
+			# TODO load dinamically
+			properties = {}
+			instance = clazz( properties, childLogger, ipAddresses)
+
 
 			# Arguments here are:
 			#   device
 			#   snaplen (maximum number of bytes to capture _per_packet_)
 			#   promiscious mode (1 for true)
 			#   timeout (in milliseconds)
-			cap = pcapy.open_live(iface, 1500, 0, 0)
+			snaplen = 1500
+
+			self.logger.debug("Opening interface:"+iface+" snaplen:"+str(snaplen))
+			cap = pcapy.open_live(iface,snaplen, 0, 0)
 
 			if pcapy.DLT_EN10MB != cap.datalink():
 				print ("Interface is not ethernet based. Quitting...")
 				#exit_gracefully() #FIXME:uncoment
 
+			# TODO debug
 			print ("%s: net=%s, mask=%s, addrs=%s" % (iface, cap.getnet(), cap.getmask(), str(ipAddresses)) )
 
-			self.logger.debug("reading filter'"+name+"'")
-			instance = clazz(self.myqueue, {}, childLogger, cap, ipAddresses)
-			instance.setDaemon(True)
-			instance.start()
-
-		self.logger.debug("done creating filter engines")
-
-	
-
-# Variable filter class
-class abstractFilter(threading.Thread):
-	"""Some description that tells you it's abstract,
-	often listing the methods you're expected to supply."""
-
-	myqueue = None
-	logger = None
-
-	def newAlert(self, message, alertType=None):
-		self.myqueue.put(message)
-
-	def __init__(self,myqueue, attributes, logger, cap, myIpAddresses):
-		#FIXME: args really needed ? =/ just interface is needed... and should be specified by config
-		self.myqueue = myqueue
-		self.logger = logger
-
-		threading.Thread.__init__(self)
-
-		self.logger.debug("init:done")
-
-	def run(self):
-		raise NotImplementedError( "Must implement run method in abstractFilter." )
-
-class icmpFilter(abstractFilter):
-	# TODO: show logarithmic warning (first, then fifth, then 15th, etc)
-	# TODO: warn if ping was replied?
-	cap = None
-	attributes = None
-	myIpAddresses = None
-
-	def __init__(self,myqueue, attributes, logger, cap, myIpAddresses):
-		super(self.__class__, self).__init__(myqueue, attributes, logger, cap, myIpAddresses)
-		self.attributes = attributes
-		self.cap = cap
-		self.myIpAddresses = myIpAddresses
-		
-	def run(self):	
-		self.logger.debug("run")
-
-		self.logger.debug('Setting filter')
-
-		rule = "icmp[icmptype] == icmp-echo"
-		#rule = "icmp-echo"
-		#rule = "icmp"
-
-		try:
-			self.cap.setfilter( rule )
-		except:
-			print ("Unable to set rule '"+rule+"' for filter '"+self.__class__.__name__+"'")
-			traceback.print_exc()
-			exit_gracefully()
-
-		self.logger.info('Waiting for packet...')
-		while True:
+			# configure rule from filter
+			rule = instance.rule()
 			try:
-				#this may block
-				(header, payload) = self.cap.next()
+				cap.setfilter( rule )				
 			except:
-				print ("cap.next() exception:"+str(sys.exc_info()[0]))
-				exit_gracefully()
-
-			rip = ImpactDecoder.EthDecoder().decode(payload)
-
-			print rip
-
-			proto = -1			
-			try:
-				proto = rip.child().get_ip_p()
-			except AttributeError:
-				pass
-
-
-			# NOT ICMP
-			if proto != 1:
-				self.logger.warn('got packet that was not ICMP?!')
+				print ("Unable to set rule '"+rule+"' for filter '"+name+"'")
+				traceback.print_exc()
 				continue
 
-			icmpType = rip.child().child().get_icmp_type()
-			if(icmpType == rip.child().child().ICMP_ECHOREPLY):
-				self.logger.warn('got icmp ECHOREPLY?!')
-				continue
+			# create thread that monitors capture
+			def workerThread(instance, interface, queue):
+				while True:
+					header = payload = None
+					try:
+						#this may block
+						(header, payload) = interface.next()
+					except:
+						print ("cap.next() exception:"+str(sys.exc_info()[0]))
+						traceback.print_exc()
+						continue
 
-			#if(icmpType == rip.child().child().ICMP_ECHO):
-			#	status = 'echo'
+					try:
+						message = instance.run(header, payload)
+						if message != None:
+							queue.put(message)
+					except:
+						print ("filter exception:"+str(sys.exc_info()[0]))
+						traceback.print_exc()
+						continue	
+						
 
-			dstAddr = rip.child().get_ip_dst()
-			srcAddr = rip.child().get_ip_src()
+			self.logger.debug("Starting filter in new thread'"+name+"'")
+			thread = Thread(target = workerThread, args=(instance, cap, self.myqueue))
+			thread.setDaemon(True)
+			thread.start()
 
-			message = 'icmp echo request from '+srcAddr+' to '+dstAddr
-
-			self.logger.debug("msg rcvd: "+str(message))
-			self.newAlert(message)
-
-class arpFilter(abstractFilter):
-	cap = None
-	attributes = None
-	myIpAddresses = None
-
-	def __init__(self,myqueue, attributes, logger, cap, myIpAddresses):
-		super(self.__class__, self).__init__(myqueue, attributes, logger, cap, myIpAddresses)
-		self.attributes = attributes
-		self.cap = cap
-		self.myIpAddresses = myIpAddresses
-		
-	def run(self):	
-		self.logger.debug("run")
-
-		self.logger.debug('Setting filter')
-
-		rule = "arp"
-
-		try:
-			self.cap.setfilter( rule )
-		except:
-			print ("Unable to set rule '"+rule+"' for filter '"+self.__class__.__name__+"'")
-			traceback.print_exc()
-			exit_gracefully()
-
-		self.logger.info('Waiting for packet...')
-		while True:
-			try:
-				#this may block
-				(header, payload) = self.cap.next()
-			except:
-				print ("cap.next() exception:"+str(sys.exc_info()[0]))
-				exit_gracefully()
-
-			rip = ImpactDecoder.EthDecoder().decode(payload)
-
-			print rip
-
-			proto = -1			
-			try:
-				proto = rip.child().get_ip_p()
-			except AttributeError:
-				pass
-
-
-			# NOT ICMP
-			if proto != 1:
-				self.logger.warn('got packet that was not ICMP?!')
-				continue
-
-			icmpType = rip.child().child().get_icmp_type()
-			if(icmpType == rip.child().child().ICMP_ECHOREPLY):
-				self.logger.warn('got icmp ECHOREPLY?!')
-				continue
-
-			#if(icmpType == rip.child().child().ICMP_ECHO):
-			#	status = 'echo'
-
-			dstAddr = rip.child().get_ip_dst()
-			srcAddr = rip.child().get_ip_src()
-
-			message = 'icmp echo request from '+srcAddr+' to '+dstAddr
-
-			self.logger.debug("msg rcvd: "+str(message))
-			self.newAlert(message)
+		self.logger.debug("Done creating filter engines")
 
 
 def signal_handler(signal_recv, frame):
@@ -444,10 +329,13 @@ def reload_config():
 	print ("\nreload config")
 
 def loadModule(name, path=None):
+	return imp.load_source(name, path)
+
 	fp, pathname, description = imp.find_module(name, path)
 
 	try:
 		return imp.load_module(name, fp, pathname, description)
+		
 	finally:
 		# Since we may exit via an exception, close fp explicitly.
 		if fp:
@@ -532,7 +420,7 @@ argvParser.add_argument('-q','--quiet',
 args = argvParser.parse_args()
 
 #start loggers
-logger = appLogger(args.quiet, args.verbose, args.log)
+logger = AppLogger.AppLogger(args.quiet, args.verbose, args.log)
 
 
 #daemonize! (or not...)
@@ -560,7 +448,7 @@ sockServer_thread.start()
 
 logger.debug('Starting filters')
 
-filters = ["icmpFilter", "arpFilter"]
+filters = ["IcmpFilter", "ArpFilter"]
 
 netMon(myqueue,filters, logger)
 
