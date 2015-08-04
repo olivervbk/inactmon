@@ -1,21 +1,30 @@
-Developed by: Oliver Kuster
+This server-client app runs filters(pcap, needs root) and reports results to users by notifications(libnotify).
+Currently has 3 filters:
+* ICMP Echo Request (Someone pinging you)
+* Arp Filter (just demo)
+* ScanFilter (tries to detect if someone is scanning the network)
 
-Don't redistribute for money.
-Don't redistribute without all original files
-Yada-yada-yada...
-
-This server-client app runs filters(pcap) and reports results to users by notifications(libnotify)...
 Still very limited and buggy, so beware!
-
-If you are still thankful, buy me a distilled alcoholic drink... or just donate...
+If you like it, buy me a beer. ;)
 
 Dependencies:
-python-argparse
 python-netifaces
 python-pcapy
 python-impacket
 python-notify
 python-appindicator | python-eggtrayicon | just pygtk | none at all, text only
 
-Note:
-I'm working on some fallback compat.
+Needs Python2 (pcapy isn't compatible with Python3)
+
+TODO:
+* improve notifications speed/recurrence
+* check code related to configuration files
+* more filters
+* improve client
+
+LICENSE:
+Don't redistribute for money.
+Don't redistribute without all original files.
+Don't take credit for it.
+Yada-yada-yada...
+
