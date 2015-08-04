@@ -16,12 +16,10 @@ import socket
 from threading import Thread
 import imp
 
-if sys.version_info >= (3, 0):
-	from queue import Queue
-elif sys.version_info >= (2,0):
+if sys.version_info >= (2,0):
 	from Queue import Queue
 else:
-	print ("Python version unknown: %s" % sys.version_info)
+	print ("Python version unsupported: %s" % sys.version_info)
 	sys.exit(1)
 
 #FIXME: not really needed anymore
@@ -43,7 +41,7 @@ from impacket import ImpactDecoder
 
 # Import custom lib, must be done after ImpactDecoder and Logging check
 import inactlib
-from inactlib import AppLogger, NetMonMessenger
+from inactlib import AppLogger
 
 import argparse
 import netifaces
@@ -220,7 +218,6 @@ class netMon:
 
 	def run(self):
 		self.logger.debug("run")
-		messenger = NetMonMessenger.NetMonMessenger(self.logger)
 
 		iface = "wlan0"
 		ipAddresses = self.checkInterface(iface)
@@ -307,9 +304,10 @@ def signal_handler(signal_recv, frame):
 
 def exit_gracefully():
 #FIXME:remove these prints
+	self.logger.shutdown()
+	self.logger = None
+
 	print ("\nexiting...")
-	logging.shutdown()
-	print ("exit_gracefully is done!")
 
 #FIXME:socket.accept and pcapy.next are blocking... AND signals are only treated in the main thread..,
 #	this could lead to problems when dealing with non reusable system resources(like inet sockets =/)
@@ -448,7 +446,7 @@ sockServer_thread.start()
 
 logger.debug('Starting filters')
 
-filters = ["IcmpFilter", "ArpFilter"]
+filters = ["IcmpFilter", "ScanFilter" ]#"ArpFilter"]
 
 netMon(myqueue,filters, logger)
 
