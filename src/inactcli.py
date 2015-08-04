@@ -7,89 +7,14 @@ import sys
 import time
 import datetime
 import socket
-import logging
+#import logging
 import copy
+import traceback
 
 #import inactlib
 #from inactlib import appLogger, netMonMessenger
 
-#FIXME:include LEVELS in appLogger class?
-LEVELS = {'debug': logging.DEBUG,
-          'info': logging.INFO,
-          'warn': logging.WARNING,
-          'error': logging.ERROR,
-          'critical': logging.CRITICAL}
-
-class appLogger:
-	# NullHandler: used to make loggers not output(quiet)
-	class NullHandler(logging.Handler):
-	    def emit(self, record):
-	       	pass
-	       	
-	log = None
-	console = None
-	
-	name = ''
-	
-	def __init__(self, quiet, verbosity, logfile):
-		self.log = logging.getLogger('log')
-		self.console = logging.getLogger('console')
-		
-		#create console logger and set verbosity level
-		try:
-			level = LEVELS[verbosity]
-			self.console.setLevel(level)
-		except KeyError:
-			logger.error("Verbose option '"+verbosity+"' invalid.")
-			sys.exit(0)
-		
-		#check if should be quiet
-		if quiet is True:
-			nh = self.NullHandler()
-			self.console.addHandler(nh)
-		else:
-			sh = logging.StreamHandler()
-			sf = logging.Formatter("%(name)s - %(levelname)s - %(message)s")
-			sh.setFormatter(sf)
-			self.console.addHandler(sh)
-			
-		logfile = None #FIXME: remove
-		if logfile is None:
-			nh = self.NullHandler()
-			self.log.addHandler(nh)
-		else:
-			logger.warn( "FIXME:log file not implemented yet...")
-	
-	def newLogger(self,name):
-		new = copy.copy(self) #deepcopy gives shit... copy doesn't... no idea why
-		new.setName(name)
-		return new
-		
-	def setName(self,name):
-		self.name = self.name+'.'+name
-		self.log = logging.getLogger('log'+self.name)
-		self.console = logging.getLogger('console'+self.name)
-		
-	def debug(self, message):
-		self.log.debug(message)
-		self.console.debug(message)
-		
-	def info(self, message):
-		self.log.info(message)
-		self.console.info(message)
-	
-	def warn(self, message):
-		self.log.warn(message)
-		self.console.warn(message)
-		
-	def error(self, message):
-		self.log.error(message)
-		self.console.error(message)
-	
-	def critical(self, message):
-		self.log.critical(message)
-		self.console.critical(message)
-
+from inactlib import AppLogger
 
 # FIXME:no need for complicated status button functions
 # FIXME:aboutdialog in appindicator crashes on close
@@ -199,8 +124,6 @@ class notificationManager(threading.Thread):
 		self.statusMan = statusMan
 	
 		self.notifier = appNotifier()
-		
-		self.parser = netMonMessenger(logger)
 
 		threading.Thread.__init__(self)
 		self.logger.debug("init done")
@@ -232,26 +155,27 @@ class notificationManager(threading.Thread):
 			message = sock.recv(1024)
 		
 			if not message:
-				logger.debug( "...connection closed")
+				self.logger.debug( "...connection closed")
 				break
 			message = str(message)
 			message = message[:-1] # remove trailing newlines
-			logger.debug( "Message recv:"+message)
+			self.logger.debug( "Message recv:"+message)
 		
 			if(self.statusMan.getStatus() == appStatus.STATUS_DISABLED):
 				logger.debug( "ignoring message")
 				continue
 
 			try:
-				self.notifier.showMessage(self.parser.decode(message))
+				self.notifier.showMessage(message)
 			except KeyboardInterrupt:
-				logger.warn( "notMan:Terminated by user")
+				self.logger.warn( "notMan:Terminated by user")
 				sock.close()
 				exit_gracefully()
 				break
 
 			except:
-				logger.error("notMan:Terminated! Error:",sys.exc_info()[0])
+				self.logger.error("notMan:Terminated! Error:"+str(sys.exc_info()[0]))
+				traceback.print_exc()
 				break
 		print ("...got here?")
 		self.run()
@@ -311,13 +235,12 @@ parser.add_argument('-t','--text',
 
 args = parser.parse_args()
 
-logger = appLogger(args.quiet, args.verbose, None)
+logger = AppLogger.AppLogger(args.quiet, args.verbose, None)
 
 FEATURES = {}
 FEATURES['notify'] = True
 FEATURES['interface'] = None
 FEATURES['tray'] = None
-FEATURES['source'] = None
 
 if args.interface == "gtk":
 	try:
@@ -341,15 +264,7 @@ else:
 	FEATURES['interface'] = False
 	FEATURES['tray'] = False
 
-try:
-	from idstools import unified2
-except:
-	logger.warn( "Could not load idstools. Trying fallback...")
-	FEATURES['source'] = False
-else:
-	logger.info( "Using snort as source.")
-	FEATURES['source'] = 'snort'
-	
+logger.debug("Using interface:"+FEATURES['interface'])
 
 if FEATURES['interface'] == "gtk":
 	class appNotifier:
@@ -359,15 +274,20 @@ if FEATURES['interface'] == "gtk":
 				exit_gracefully()
 			logger.debug( "pynotify init.")
 		def showMessage(self,message):
-			notification = pynotify.Notification(
-				"Inactcli",
-				message,
-				"notification-message-email")
-			notification.set_urgency(pynotify.URGENCY_NORMAL)
-			notification.set_hint_string("x-canonical-append","")
-			notification.attach_to_widget(self)
-			if not notification.show():
-				logger.warn( "Unable to show notification")
+			try:
+				notification = pynotify.Notification(
+					"Inactcli",
+					message)
+					#"notification-message-email")
+				notification.set_urgency(pynotify.URGENCY_NORMAL)
+				notification.set_hint_string("x-canonical-append","")
+				#notification.attach_to_widget(self)
+				if not notification.show():
+					logger.warn( "Unable to show notification")
+			except:
+				logger.error("appNotifier: Error:"+str(sys.exc_info()[0]))
+				traceback.print_exc()
+				
 else:
 	class appNotifier:
 		def __init__(self):
@@ -476,27 +396,20 @@ if FEATURES['interface'] == "gtk":
 	gtk.gdk.threads_init() # this makes gtk to allow threads =/
 
 logger.info("Threading notificationManager")
-#notMan = notificationManager( args.socketFile, statusMan, logger)
-#notMan.setDaemon(True)
-#notMan.start()
+notMan = notificationManager( args.socketFile, statusMan, logger)
+notMan.setDaemon(True)
+notMan.start()
+
+appNotifier().showMessage("Inact started.")
 
 try:
 	if FEATURES['interface'] == "gtk":
 		gtk.main()
 	else:
-		#TODO extract as class
-		if FEATURES['source'] == "snort":
-			notifier = appNotifier()
-			logger.info("Starting unified2.SpoolEventReader...");
-			reader = unified2.SpoolEventReader("/var/log/snort", "unified2.log", follow=True)
-			for event in reader:
-				logger.debug(event)
-				notifier.showMessage(event)
-		else:
-			#just sleep?
-			while(True):
-				time.sleep(50)
-				#print "."
+		#just sleep?
+		while(True):
+			time.sleep(50)
+			#print "."
 except:
 	logger.error( "main:Terminated! Error:",sys.exc_info()[0])
 	#exit_gracefully()

@@ -1,5 +1,13 @@
 from impacket import ImpactDecoder
 
+import inspect
+
+def dump(obj):
+  for name, data in inspect.getmembers(obj):
+    if name == '__builtins__':
+        continue
+    print '%s :' % name, repr(data)
+
 class ArpFilter():
 	attributes = None
 	myIpAddresses = None
@@ -29,24 +37,18 @@ class ArpFilter():
 		except AttributeError:
 			pass
 
-
-		# NOT ICMP
-		if proto != 1:
-			self.logger.warn('got packet that was not ICMP?!')
+		etherType = rip.get_ether_type()
+		if etherType != 2054:
+			self.logger.warn("doesnt seem to be ARP..")
 			return None
 
-		icmpType = rip.child().child().get_icmp_type()
-		if(icmpType == rip.child().child().ICMP_ECHOREPLY):
-			self.logger.warn('got icmp ECHOREPLY?!')
-			return None
+		arp = rip.child()
+		print ("op name:"+str(arp.get_op_name(arp.get_ar_op())))
 
-		#if(icmpType == rip.child().child().ICMP_ECHO):
-		#	status = 'echo'
+		print ("src mac:"+str(arp.as_hrd(arp.get_ar_sha())))
 
-		dstAddr = rip.child().get_ip_dst()
-		srcAddr = rip.child().get_ip_src()
-
-		message = 'icmp echo request from '+srcAddr+' to '+dstAddr
-
-		self.logger.debug("msg rcvd: "+str(message))
-		return message
+		print ("src ip:"+str(arp.as_pro(arp.get_ar_spa())))
+		print ("queried ip:"+str(arp.as_pro(arp.get_ar_tpa())))
+		
+		# never send messages
+		return None
