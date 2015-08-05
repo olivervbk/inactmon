@@ -225,7 +225,7 @@ class netMon:
 
 			## this would be used if the class were defined in here...
 			#clazz = globals()[name]
-			module = loadModule(name, "./modules/"+name+".py")
+			module = loadModule(name)
 			clazz = getattr(module, name)
 	
 			instance = None		
@@ -339,6 +339,9 @@ def reload_config():
 	print ("\nreload config")
 
 def loadModule(name, path=None):
+	if path == None:
+		pathDir = os.path.dirname(os.path.realpath(__file__))
+		path = pathDir+"/modules/"+name+".py"
 	return imp.load_source(name, path)
 
 	fp, pathname, description = imp.find_module(name, path)
