@@ -409,5 +409,5 @@ try:
 			time.sleep(50)
 			#print "."
 except:
-	logger.error( "main:Terminated! Error:",sys.exc_info()[0])
+	logger.error( "main:Terminated! Error:"+str(sys.exc_info()[0]))
 	#exit_gracefully()
