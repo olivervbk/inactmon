@@ -49,13 +49,6 @@ class AppLogger:
 			self.log.addHandler(nh)
 		else:
 			print "FIXME:log file not implemented yet..."
-
-	def shutdown(self):
-		self.log.shutdown()
-		self.log = None
-
-		self.console.shutdown()
-		self.console = None
 	
 	def newLogger(self,name):
 		new = copy.copy(self) #deepcopy gives shit... copy doesn't... no idea why

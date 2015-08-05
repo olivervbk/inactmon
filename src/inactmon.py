@@ -50,6 +50,8 @@ DEFAULT['interface'] = "eth0"
 
 CURRENT = copy.deepcopy(DEFAULT) #damned objects...
 
+logger = None
+
 import ConfigParser
 
 # --- Classes ---
@@ -317,10 +319,6 @@ def signal_handler(signal_recv, frame):
 		reload_config()
 
 def exit_gracefully(code=0):
-#FIXME:remove these prints
-	self.logger.shutdown()
-	self.logger = None
-
 	print ("\nexiting...")
 
 #FIXME:socket.accept and pcapy.next are blocking... AND signals are only treated in the main thread..,
