@@ -283,7 +283,7 @@ class netMon:
 							lastMessageTimestamp = time.time()
 							queue.put(message)
 						else:
-							self.logger.debug("ignoring too many messages from: ",instance.__class__.__name__)
+							self.logger.debug("ignoring too many messages from: "+str(instance.__class__.__name__))
 					except:
 						self.logger.error("filter exception:"+str(sys.exc_info()[0]))
 						traceback.print_exc()
@@ -449,7 +449,7 @@ sockServer_thread.start()
 
 logger.debug('Starting filters')
 
-filters = ["IcmpFilter", "ScanFilter" ]#"ArpFilter"]
+filters = ["IcmpFilter", "ScanFilter", "TcpSynFilter" ]#"ArpFilter"]
 
 netMon(myqueue,filters, logger)
 

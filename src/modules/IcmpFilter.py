@@ -18,16 +18,8 @@ class IcmpFilter():
 
 		
 	def run(self, header, payload):
-		self.logger.debug("run")
-
-		self.logger.debug('Setting filter')
-			
-
-		self.logger.info('Waiting for packet...')
-		
-
 		rip = ImpactDecoder.EthDecoder().decode(payload)
-		print rip
+		#print rip
 
 		proto = -1			
 		try:

@@ -2,7 +2,6 @@ from impacket import ImpactDecoder
 
 import inspect
 
-import calendar
 import time
 
 def dump(obj):
@@ -29,13 +28,8 @@ class ScanFilter():
 		return rule
 		
 	def run(self, header, payload):	
-		self.logger.debug("run")
-
-		self.logger.debug('Setting filter')
-		
-
 		rip = ImpactDecoder.EthDecoder().decode(payload)
-		print rip
+		#print rip
 
 		etherType = rip.get_ether_type()
 		if etherType != 2054:
@@ -43,19 +37,19 @@ class ScanFilter():
 			return None
 
 		arp = rip.child()
-		print ("op name:"+str(arp.get_op_name(arp.get_ar_op())))
+		#print ("op name:"+str(arp.get_op_name(arp.get_ar_op())))
 
 		srcMac = str(arp.as_hrd(arp.get_ar_sha()))
-		print ("src mac:"+srcMac)
+		#print ("src mac:"+srcMac)
 
 		srcIp = str(arp.as_pro(arp.get_ar_spa()))
-		print ("src ip:"+srcIp)
+		#print ("src ip:"+srcIp)
 
 		queriedIp = str(arp.as_pro(arp.get_ar_tpa()))
-		print ("queried ip:"+queriedIp)
+		#print ("queried ip:"+queriedIp)
 
 
-		now = calendar.timegm(time.gmtime())
+		now = time.time()
 
 		last = None
 		if srcMac in self.timestamp:
