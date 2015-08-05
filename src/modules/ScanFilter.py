@@ -24,7 +24,7 @@ class ScanFilter():
 		self.myIpAddresses = myIpAddresses
 
 	def rule(self):
-		rule = "arp"
+		rule = "arp and inbound"
 		return rule
 		
 	def run(self, header, payload):	
