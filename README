@@ -25,10 +25,10 @@ Needs Python2 for inactmon.py (pcapy isn't compatible with Python3)
 
 GETTING STARTED:
 run daemon:
-cd src; sudo python2 inactmon.py -d -v debug -i <interface to listen on>
+sudo python2 src/inactmon.py -d -v debug -i <interface to listen on>
 
 run client (will start in tray):
-cd src; python2 inactcli.py
+python2 src/inactcli.py
 
 
 TODO:
