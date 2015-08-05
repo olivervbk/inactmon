@@ -46,6 +46,7 @@ DEFAULT['verbose'] = 'warn'
 DEFAULT['debug'] = False
 DEFAULT['config'] = 'inactmon.conf' #FIXME:/etc/inactmon.conf
 DEFAULT['log'] = 'inactmon.log'#FIXME:/var/log/inactmon.log
+DEFAULT['interface'] = "eth0"
 
 CURRENT = copy.deepcopy(DEFAULT) #damned objects...
 
@@ -210,7 +211,7 @@ class netMon:
 	def run(self):
 		self.logger.debug("run")
 
-		iface = "wlan0"
+		iface = CURRENT['interface'] 
 		ipAddresses = self.checkInterface(iface)
 
 		self.logger.debug("starting filter engines")
@@ -413,6 +414,13 @@ argvParser.add_argument('-v','--verbose',
 	default=CURRENT['verbose'],
 	help='More output(debug|info|warn|error|critical) Warn is default.')
 
+argvParser.add_argument('-i','--interface', 
+	required=False, 
+	dest='interface',  
+	type=str,
+	default=CURRENT['interface'],
+	help="Defines the interface to listen on (must be pcap compatible). Default is "+str(DEFAULT['interface']))
+
 argvParser.add_argument('-d','--debug', 
 	required=False, 
 	dest='debug', 
@@ -429,6 +437,8 @@ argvParser.add_argument('-q','--quiet',
 
 #parse args
 args = argvParser.parse_args()
+
+CURRENT['interface'] = args.interface
 
 #start loggers
 logger = AppLogger.AppLogger(args.quiet, args.verbose, args.log)
