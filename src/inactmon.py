@@ -13,6 +13,7 @@ import copy
 import socket
 from threading import Thread
 import imp
+import json
 
 import pcapy
 import impacket
@@ -277,13 +278,22 @@ class netMon:
 						if message == None:
 							continue
 
+						filterName = str(instance.__class__.__name__)
+
 						# TODO configurable time
 						# TODO improve logic using quantity of messages/time instead of just a time limit
 						if time.time() - lastMessageTimestamp > 5:
 							lastMessageTimestamp = time.time()
-							queue.put(message)
+
+							data = {}
+							data['filter'] = filterName
+							data['message'] = message
+							data['timestamp'] = time.time()
+							json_data = json.dumps(data)
+
+							queue.put(json_data)
 						else:
-							self.logger.debug("ignoring too many messages from: "+str(instance.__class__.__name__))
+							self.logger.debug("ignoring too many messages from: "+filterName)
 					except:
 						self.logger.error("filter exception:"+str(sys.exc_info()[0]))
 						traceback.print_exc()
