@@ -31,13 +31,13 @@ DEFAULT_VERBOSE_LEVEL = 'debug'
 
 ICONS = {}
 ICONS['active'] = {}
-ICONS['active']['filename'] = "./eye-version3-active.svg"
+ICONS['active']['filename'] = "../images/eye-version3-active.svg"
 ICONS['active']['name'] = "inactcli-active"
 ICONS['disabled']={}
-ICONS['disabled']['filename'] = "./eye-version3-passive.svg"
+ICONS['disabled']['filename'] = "../images/eye-version3-passive.svg"
 ICONS['disabled']['name'] = "inactcli-passive"
 ICONS['error']={}
-ICONS['error']['filename'] = "./eye-version3-attention.svg"
+ICONS['error']['filename'] = "../images/eye-version3-attention.svg"
 ICONS['error']['name'] = "inactcli-attention"
 
 import argparse
@@ -123,7 +123,7 @@ class notificationManager(threading.Thread):
 		self.socketFile = socketFile
 		self.statusMan = statusMan
 	
-		self.notifier = appNotifier()
+		self.notifier = AppNotifier()
 
 		threading.Thread.__init__(self)
 		self.logger.debug("init done")
@@ -250,15 +250,13 @@ if args.interface == "gtk":
 		import pygtk
 		pygtk.require('2.0')
 		import gtk
+		FEATURES['tray'] = "gtk"
+		FEATURES['interface'] = "gtk"
 
 	except:
 		logger.warn( "Could not load GTK. Trying fallback...")
 		FEATURES['interface'] = False
 		FEATURES['tray'] = False
-	else:
-		if FEATURES['tray'] is None:
-			FEATURES['tray'] = "gtk"
-		FEATURES['interface'] = "gtk"
 else:
 	logger.info( "Interface is text...")
 	FEATURES['interface'] = False
@@ -267,7 +265,7 @@ else:
 logger.debug("Using interface:"+FEATURES['interface'])
 
 if FEATURES['interface'] == "gtk":
-	class appNotifier:
+	class AppNotifier:
 		def __init__(self):
 			if not pynotify.init('Inactcli'):
 				logger.error( "error initializing pynotify.")
@@ -285,11 +283,11 @@ if FEATURES['interface'] == "gtk":
 				if not notification.show():
 					logger.warn( "Unable to show notification")
 			except:
-				logger.error("appNotifier: Error:"+str(sys.exc_info()[0]))
+				logger.error("AppNotifier: Error:"+str(sys.exc_info()[0]))
 				traceback.print_exc()
 				
 else:
-	class appNotifier:
+	class AppNotifier:
 		def __init__(self):
 			logger.info( "notifier init: no interface. Falling back to terminal.")
 		def showMessage(self,message):
@@ -307,7 +305,7 @@ if FEATURES['interface'] == "gtk":
 			aboutdialog.set_copyright("Don't redistribute! :P")
 			aboutdialog.set_comments("Shows notifications about incomming activity based on pcap rules.")
 			aboutdialog.set_authors(["Oliver Kuster"])
-			aboutdialog.set_logo(gtk.gdk.pixbuf_new_from_file_at_size("eye-version3-active.svg",100,100))
+			aboutdialog.set_logo(gtk.gdk.pixbuf_new_from_file_at_size("../images/eye-version3-active.svg",100,100))
 #			self.logger.debug('done setting values, running')
 			
 		
@@ -400,7 +398,7 @@ notMan = notificationManager( args.socketFile, statusMan, logger)
 notMan.setDaemon(True)
 notMan.start()
 
-appNotifier().showMessage("Inact started.")
+AppNotifier().showMessage("Inact started.")
 
 try:
 	if FEATURES['interface'] == "gtk":
