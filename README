@@ -3,18 +3,28 @@ Currently has 3 filters:
 * ICMP Echo Request (Someone pinging you)
 * Arp Filter (just demo)
 * ScanFilter (tries to detect if someone is scanning the network)
+* TcpSynFilter (detects incoming connection attempts)
 
 Still very limited and buggy, so beware!
 If you like it, buy me a beer. ;)
 
-Dependencies:
-python-netifaces
-python-pcapy
-python-impacket
-python-notify
+DEPENDENCIES:
+python2-netifaces
+python2-pcapy
+impacket
+python2-notify/libnotify
 python-appindicator | python-eggtrayicon | just pygtk | none at all, text only
 
-Needs Python2 (pcapy isn't compatible with Python3)
+Needs Python2 for inactmon.py (pcapy isn't compatible with Python3)
+
+
+GETTING STARTED:
+run daemon:
+cd src; sudo python2 inactmon.py -d -v debug
+
+run client (will start in tray):
+cd src; python2 inactcli.py
+
 
 TODO:
 * improve notifications speed/recurrence
