@@ -10,6 +10,7 @@ import socket
 #import logging
 import copy
 import traceback
+import json
 
 #import inactlib
 #from inactlib import appLogger, netMonMessenger
@@ -43,10 +44,11 @@ ICONS['error']['name'] = "inactcli-attention"
 import argparse
 
 # pynotify->gi.repository.Notify
-if sys.version_info >= (3, 0):
+#if sys.version_info >= (3, 0):
+	
+if sys.version_info >= (2,0):
 	from gi.repository import Notify
-elif sys.version_info >= (2,0):
-	import pynotify
+#	import pynotify
 else:
 	print ("Python version unknown: %s" % sys.version_info)
 	sys.exit(1)
@@ -152,21 +154,23 @@ class notificationManager(threading.Thread):
 
 		self.logger.debug("Connected to server")
 		while True:
-			message = sock.recv(1024)
-		
-			if not message:
-				self.logger.debug( "...connection closed")
-				break
-			message = str(message)
-			message = message[:-1] # remove trailing newlines
-			self.logger.debug( "Message recv:"+message)
-		
-			if(self.statusMan.getStatus() == appStatus.STATUS_DISABLED):
-				logger.debug( "ignoring message")
-				continue
-
 			try:
-				self.notifier.showMessage(message)
+				jsonData = sock.recv(1024)
+		
+				if not jsonData:
+					self.logger.debug( "...connection closed")
+					break
+				self.logger.debug( "Message recv:"+str(jsonData))
+
+				data = json.loads(jsonData)
+				message = data['message']
+				filterName = data['filter']
+		
+				if(self.statusMan.getStatus() == appStatus.STATUS_DISABLED):
+					logger.debug( "ignoring message")
+					continue
+
+				self.notifier.showMessage(filterName, message)
 			except KeyboardInterrupt:
 				self.logger.warn( "notMan:Terminated by user")
 				sock.close()
@@ -182,7 +186,7 @@ class notificationManager(threading.Thread):
 
 def exit_gracefully():
 	logger.debug( "exiting gracefully...")
-	gtk.main_quit() #w00t!
+	Gtk.main_quit() #w00t!
 
 #__main__:
 
@@ -244,12 +248,16 @@ FEATURES['tray'] = None
 
 if args.interface == "gtk":
 	try:
-		import gobject
+		from gi.repository import GObject
+		# import gobject
 
 		# pygtk require for local file resources (images)
-		import pygtk
-		pygtk.require('2.0')
-		import gtk
+		#import pygtk
+		#pyGtk.require('2.0')
+		from gi.repository import Gtk
+		from gi.repository import Gdk
+		from gi.repository import GdkPixbuf
+		#import gtk
 		FEATURES['tray'] = "gtk"
 		FEATURES['interface'] = "gtk"
 
@@ -267,17 +275,17 @@ logger.debug("Using interface:"+FEATURES['interface'])
 if FEATURES['interface'] == "gtk":
 	class AppNotifier:
 		def __init__(self):
-			if not pynotify.init('Inactcli'):
-				logger.error( "error initializing pynotify.")
+			if not Notify.init('Inactcli'):
+				logger.error( "error initializing Notify.")
 				exit_gracefully()
-			logger.debug( "pynotify init.")
-		def showMessage(self,message):
+			logger.debug( "Nofity init.")
+		def showMessage(self,filterName, message):
 			try:
-				notification = pynotify.Notification(
+				notification = Notify.Notification.new(
 					"Inactcli",
-					message)
+					message, ICONS['active']['filename'])
 					#"notification-message-email")
-				notification.set_urgency(pynotify.URGENCY_NORMAL)
+				notification.set_urgency(Notify.Urgency.NORMAL)
 				notification.set_hint_string("x-canonical-append","")
 				#notification.attach_to_widget(self)
 				if not notification.show():
@@ -290,7 +298,7 @@ else:
 	class AppNotifier:
 		def __init__(self):
 			logger.info( "notifier init: no interface. Falling back to terminal.")
-		def showMessage(self,message):
+		def showMessage(self, filterName, message):
 			print (message)
 
 if FEATURES['interface'] == "gtk":
@@ -298,14 +306,14 @@ if FEATURES['interface'] == "gtk":
 #			self.logger = logger.newLogger('aboutDialog-gtk')
 			
 #			self.logger.debug('init')
-			aboutdialog = gtk.AboutDialog()
+			aboutdialog = Gtk.AboutDialog()
 			
 			aboutdialog.set_name("Inactmon-cli")
 			aboutdialog.set_version("1.0")
 			aboutdialog.set_copyright("Don't redistribute! :P")
 			aboutdialog.set_comments("Shows notifications about incomming activity based on pcap rules.")
 			aboutdialog.set_authors(["Oliver Kuster"])
-			aboutdialog.set_logo(gtk.gdk.pixbuf_new_from_file_at_size("../images/eye-version3-active.svg",100,100))
+			aboutdialog.set_logo(GdkPixbuf.Pixbuf.new_from_file_at_size("../images/eye-version3-active.svg",100,100))
 #			self.logger.debug('done setting values, running')
 			
 		
@@ -323,28 +331,28 @@ else:
 			self.logger.debug('done')
 
 if FEATURES['tray'] == "gtk":
-	class trayIcon(gtk.StatusIcon):
+	class trayIcon(Gtk.StatusIcon):
 		def __init__(self, statusMan, logger):
 			self.logger = logger.newLogger('trayIcon-gtk')
 			
 			self.statusMan = statusMan
-			gtk.StatusIcon.__init__(self)
+			Gtk.StatusIcon.__init__(self)
 			
 			self.set_from_file(ICONS['active']['filename'])
-			self.set_tooltip('Inactcli')
+			#self.set_tooltip('Inactcli')
 			self.set_visible(True)
 
-			self.menu = menu = gtk.Menu()
+			self.menu = menu = Gtk.Menu()
 
-			self.status_item = status_item = gtk.MenuItem("Disable")
+			self.status_item = status_item = Gtk.MenuItem("Disable")
 			status_item.connect("activate", self.status_button, "status clicked")
 			menu.append(status_item)
 
-			about_item = gtk.MenuItem("About")
+			about_item = Gtk.MenuItem("About")
 			about_item.connect("activate", self.aboutdialog,"about")
 			menu.append(about_item)
 
-			quit_item = gtk.MenuItem("Quit")
+			quit_item = Gtk.MenuItem("Quit")
 			quit_item.connect("activate", self.destroy_button, "file.quit")
 			menu.append(quit_item)
 			menu.show_all()
@@ -352,7 +360,7 @@ if FEATURES['tray'] == "gtk":
 			self.connect('popup-menu', self.icon_clicked)
 
 		def icon_clicked(self, status, button, time):
-			self.menu.popup(None, None, None, button, time)
+			self.menu.popup(None, None, None, None, button, time)
 
 		def aboutdialog(self, widget, event=None):
 			aboutDialog(self.logger)
@@ -391,18 +399,16 @@ tray = trayIcon(statusMan, logger)
 statusMan.setTray(tray)
 
 if FEATURES['interface'] == "gtk":
-	gtk.gdk.threads_init() # this makes gtk to allow threads =/
+	Gdk.threads_init() # this makes gtk to allow threads =/
 
 logger.info("Threading notificationManager")
 notMan = notificationManager( args.socketFile, statusMan, logger)
 notMan.setDaemon(True)
 notMan.start()
 
-AppNotifier().showMessage("Inact started.")
-
 try:
 	if FEATURES['interface'] == "gtk":
-		gtk.main()
+		Gtk.main()
 	else:
 		#just sleep?
 		while(True):
