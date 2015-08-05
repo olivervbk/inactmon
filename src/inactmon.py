@@ -8,22 +8,25 @@ import time
 import datetime
 
 import traceback
-
 import argparse
-
 import copy
 import socket
 from threading import Thread
 import imp
+
+import pcapy
+import impacket
+import netifaces
+
+# Import custom lib, must be done after ImpactDecoder and Logging check
+import inactlib
+from inactlib import AppLogger
 
 if sys.version_info >= (2,0):
 	from Queue import Queue
 else:
 	print ("Python version unsupported: %s" % sys.version_info)
 	sys.exit(1)
-
-#FIXME: not really needed anymore
-import logging
 
 
 #FIXME:classes that use the logging functionality should init with the logging base name =/
@@ -33,18 +36,6 @@ import logging
 #TODO:to be able to remove argparse, must create interface for it =/
 #FIXME:do daemonic threads damage non-renewable system resources?(inet sockets?)(pcap resources?)
 
-# Import needed libraries
-
-import pcapy
-import impacket
-from impacket import ImpactDecoder
-
-# Import custom lib, must be done after ImpactDecoder and Logging check
-import inactlib
-from inactlib import AppLogger
-
-import argparse
-import netifaces
 
 # --- Default Values ---
 DEFAULT = {}
@@ -145,7 +136,7 @@ class sockServer(Thread):
 		except OSError:
 		    pass
 		except:
-			print ("os.remove exception:"+sys.exc_info()[0] )
+			self.logger.error("os.remove exception:"+sys.exc_info()[0] )
 			exit_gracefully()
 
 		self.sock.bind(self.sockFile)
@@ -159,12 +150,11 @@ class sockServer(Thread):
 				connection, address = self.sock.accept()
 				self.cliHandler.append(connection)
 			except:
-				print ("socket loop exception:"+str(sys.exc_info()[0]))
+				self.logger.error("socket loop exception:"+str(sys.exc_info()[0]))
 				break
 
 		#The following will probably never run since sock.accept() blocks and this thread is 'killed' on exit
 		self.sock.close()
-		self.logger.warn("exiting gracefully")
 		exit_gracefully()
 
 # Class that handles filters	
@@ -190,15 +180,15 @@ class netMon:
 		try:
 			ifs = pcapy.findalldevs()
 		except pcapy.PcapError:
-			print ("Unable to get interfaces. Are you running as root?")
+			self.logger.error("Unable to get interfaces. Are you running as root?")
 			exit_gracefully()
 
 		if 0 == len(ifs):
-			print ("No interfaces available.")
+			self.logger.error("No interfaces available.")
 			exit_gracefully()
 
 		if not iface in ifs:
-			print ("Interface '%s' not found." % (iface))
+			self.logger.error("Interface '%s' not found." % (iface))
 			exit_gracefully()
 
 		ipAddresses = [] 
@@ -212,8 +202,8 @@ class netMon:
 						ipAddresses.append(address['addr'])
 			except KeyError:
 				if iface == ifaceName:
-					print ("Interface '%s' is down." % (iface))
-					#exit_gracefully() #FIXME:uncoment
+					self.logger.error("Interface '%s' is down." % (iface))
+					exit_gracefully()
 		return ipAddresses
 
 	def run(self):
@@ -233,11 +223,16 @@ class netMon:
 			#clazz = globals()[name]
 			module = loadModule(name, "./modules/"+name+".py")
 			clazz = getattr(module, name)
-			
+	
+			instance = None		
 			# TODO load dinamically
 			properties = {}
-			instance = clazz( properties, childLogger, ipAddresses)
-
+			try:
+				instance = clazz( properties, childLogger, ipAddresses)
+			except:
+				self.logger.error("Unable to instantiate filter '"+name+"'")
+				traceback.print_exc()
+				continue
 
 			# Arguments here are:
 			#   device
@@ -250,39 +245,47 @@ class netMon:
 			cap = pcapy.open_live(iface,snaplen, 0, 0)
 
 			if pcapy.DLT_EN10MB != cap.datalink():
-				print ("Interface is not ethernet based. Quitting...")
-				#exit_gracefully() #FIXME:uncoment
+				self.logger.error ("Interface is not ethernet based. Quitting...")
+				exit_gracefully()
 
-			# TODO debug
-			print ("%s: net=%s, mask=%s, addrs=%s" % (iface, cap.getnet(), cap.getmask(), str(ipAddresses)) )
+			self.logger.debug("%s: net=%s, mask=%s, addrs=%s" % (iface, cap.getnet(), cap.getmask(), str(ipAddresses)) )
 
 			# configure rule from filter
 			rule = instance.rule()
 			try:
 				cap.setfilter( rule )				
 			except:
-				print ("Unable to set rule '"+rule+"' for filter '"+name+"'")
+				self.logger.error("Unable to set rule '"+rule+"' for filter '"+name+"'")
 				traceback.print_exc()
 				continue
 
 			# create thread that monitors capture
 			def workerThread(instance, interface, queue):
+				lastMessageTimestamp = time.time()
 				while True:
 					header = payload = None
 					try:
 						#this may block
 						(header, payload) = interface.next()
 					except:
-						print ("cap.next() exception:"+str(sys.exc_info()[0]))
+						self.logger.error("cap.next() exception:"+str(sys.exc_info()[0]))
 						traceback.print_exc()
 						continue
 
 					try:
 						message = instance.run(header, payload)
-						if message != None:
+						if message == None:
+							continue
+
+						# TODO configurable time
+						# TODO improve logic using quantity of messages/time instead of just a time limit
+						if time.time() - lastMessageTimestamp > 5:
+							lastMessageTimestamp = time.time()
 							queue.put(message)
+						else:
+							self.logger.debug("ignoring too many messages from: ",instance.__class__.__name__)
 					except:
-						print ("filter exception:"+str(sys.exc_info()[0]))
+						self.logger.error("filter exception:"+str(sys.exc_info()[0]))
 						traceback.print_exc()
 						continue	
 						
@@ -302,7 +305,7 @@ def signal_handler(signal_recv, frame):
 	if signal_recv == signal.SIGHUP:
 		reload_config()
 
-def exit_gracefully():
+def exit_gracefully(code=0):
 #FIXME:remove these prints
 	self.logger.shutdown()
 	self.logger = None
@@ -320,7 +323,7 @@ def exit_gracefully():
 #	os._exit(0) # kills all threads
 #	sys.exit(0) # does only exit current thread(main)
 
-	sys.exit(0)
+	sys.exit(code)
 
 def reload_config():
 #TODO:implement
@@ -428,7 +431,7 @@ if args.debug is None or args.debug is not True:
 		pid = os.fork()
 
 	except:
-		print ("Could not fork:"+str(sys.exc_info()[0]) ) #FIXME: should be logger?
+		logger.error("Could not fork:"+str(sys.exc_info()[0]) ) #FIXME: should be logger?
 		sys.exit(1)
 
 	if pid != 0:
@@ -454,11 +457,9 @@ netMon(myqueue,filters, logger)
 while 1:
 	try:
 		time.sleep(50)
-		print (".") #FIXME:remove
 	except SystemExit:
 		break
 	except:
-		print ("Main (useless) loop end:"+str(sys.exc_info()[0]) ) #FIXME:as logger?
 		break
 logger.debug('Main Thread ended.')
 sys.exit(0)
