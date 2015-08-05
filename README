@@ -9,11 +9,16 @@ Still very limited and buggy, so beware!
 If you like it, buy me a beer. ;)
 
 DEPENDENCIES:
+
+daemon:
 python2-netifaces
 python2-pcapy
 impacket
-python2-notify/libnotify
-python-appindicator | python-eggtrayicon | just pygtk | none at all, text only
+
+client:
+python2-notify | libnotify
+python-gobject, python2-gobject (depends on python version used...)
+OR none at all, use as text only
 
 Needs Python2 for inactmon.py (pcapy isn't compatible with Python3)
 
