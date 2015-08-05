@@ -225,9 +225,14 @@ class netMon:
 
 			## this would be used if the class were defined in here...
 			#clazz = globals()[name]
-			module = loadModule(name)
-			clazz = getattr(module, name)
-	
+			clazz = None
+			try:
+				module = loadModule(name)
+				clazz = getattr(module, name)
+			except:
+				self.logger.error("Unable to load filter file: '"+name+"'")
+				continue
+
 			instance = None		
 			# TODO load dinamically
 			properties = {}

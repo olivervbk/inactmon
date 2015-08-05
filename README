@@ -24,7 +24,7 @@ Needs Python2 for inactmon.py (pcapy isn't compatible with Python3)
 
 
 GETTING STARTED:
-run daemon:
+run daemon (needs root to monitor interface):
 sudo python2 src/inactmon.py -d -v debug -i <interface to listen on>
 
 run client (will start in tray):

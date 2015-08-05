@@ -21,7 +21,7 @@ class TcpSynFilter():
 		self.myIpAddresses = myIpAddresses
 
 	def rule(self):
-		rule = "tcp[tcpflags] == tcp-syn"
+		rule = "((tcp[tcpflags] & tcp-syn) != 0) and ((tcp[tcpflags] & tcp-ack) == 0) and inbound"
 		return rule
 		
 	def run(self, header, payload):	
@@ -29,8 +29,10 @@ class TcpSynFilter():
 		print rip
 
 		etherType = rip.get_ether_type()
-		print ("ethertype:", etherType)
-		
+		if etherType != 2048:
+			self.logger.warn("Doesn't seem to be TCP packet...")
+			return None
+
 		child = rip.child()
 		tcp = child.child()
 		
