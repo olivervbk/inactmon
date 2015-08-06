@@ -18,7 +18,6 @@ import json
 from inactlib import AppLogger
 
 # FIXME:no need for complicated status button functions
-# FIXME:aboutdialog in appindicator crashes on close
 # FIXME:gtk trayicon shows menu on left click =/
 # TODO: implement icon changes, all of them =/
 # TODO: set version variables and improve about dialog
@@ -194,7 +193,7 @@ def absolutePath():
 
 #__main__:
 
-parser = argparse.ArgumentParser(description='Incoming Netword Activity Client.')
+parser = argparse.ArgumentParser(description='Incoming Network Activity Client.')
 
 #TODO: perhaps enable inet socket as well
 # parser.add_argument('-p', '--port',
