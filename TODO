@@ -2,27 +2,29 @@ TODO:
 -improve todo list
 
 CLIENT:
--fix: app freezes on close in about dialog using appindicator
+-improve alert management:
+	-some filter should be able to send multiple warnings
+	-rewrite existing warning on filters which may not send multiple
+-try to reduce dependencies and increase portability...
 -create fallbacks: 
 	-gtk->qt?
 	-netifaces->system('ifconfig...?')
--try to reduce dependencies and increase portability...
--test in kde
--test in non ubuntu OS
-
 -setup logging in client
 -improve about window
 
 SERVER:
+-fiddle around with messages
 -create some filter types(like incomming udp packets, arp-spoof, w/e)
+-sandbox modules execution
 
 GENERAL:
 -enable settings to force fallbacks..?
-
 -install script+stuff
 -create manpages
 -rewrite README
 -tidy up code...
 
 KNOWN ISSUES:
--if its not above, report in bug report section... most recent version only, since there is no stable yet
+-tray icon does not always show on Gnome-Shell 3.16 (hiding and expanding the tray tab forces icon refreshing?)
+
+If its not above, create issue in github or send email... most recent version only, since there is no stable yet
