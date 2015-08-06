@@ -24,7 +24,7 @@ class ScanFilter():
 		self.myIpAddresses = myIpAddresses
 
 	def rule(self):
-		rule = "arp and inbound"
+		rule = "arp"
 		return rule
 		
 	def run(self, header, payload):	
@@ -71,6 +71,10 @@ class ScanFilter():
 
 		# save current timestamp
 		self.timestamp[srcMac] = now
+
+		# warn only on the first time
+		if last != None and (now - last) < 5:
+			return None
 
 		if len(queriedIps) > 10:
 			return "Possible network scan from: "+srcIp

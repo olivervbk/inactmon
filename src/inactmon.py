@@ -95,6 +95,10 @@ class sockServer(Thread):
 					except:
 						self.logger.info( "client died?:"+str(sys.exc_info()[0]))
 						deadClients.append(client)
+
+				if not self.clients:
+					self.logger.debug("No clients to send message:"+message)
+
 				self.queue.task_done() #kinda useless, required by queue
 			
 				self.logger.debug("removing dead clients...")
@@ -231,6 +235,7 @@ class netMon:
 				clazz = getattr(module, name)
 			except:
 				self.logger.error("Unable to load filter file: '"+name+"'")
+				traceback.print_exc()
 				continue
 
 			instance = None		
@@ -475,7 +480,7 @@ sockServer_thread.start()
 
 logger.debug('Starting filters')
 
-filters = ["IcmpFilter", "ScanFilter", "TcpSynFilter" ]#"ArpFilter"]
+filters = ["IcmpFilter", "ScanFilter", "TcpSynFilter", "NewMachineByMacFilter" ]#"ArpFilter"]
 
 netMon(myqueue,filters, logger)
 

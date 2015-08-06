@@ -19,7 +19,7 @@ class ArpFilter():
 		self.myIpAddresses = myIpAddresses
 
 	def rule(self):
-		rule = "arp and inbound"
+		rule = "arp"
 		return rule
 		
 	def run(self, header, payload):	
