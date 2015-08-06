@@ -113,21 +113,18 @@ class AppStatus:
 			#FIXME:disable button =/ and reenable elsewheres?
 
 class NotificationManager(threading.Thread):
-	server = ''
-	port = ''
+	socketFile = None
+	statusMan = None
 	notifier = None
 
 	def __init__(self, socketFile, statusMan, logger, notifier):
 		self.logger = logger
-		self.logger.debug("init")
 	
 		self.socketFile = socketFile
 		self.statusMan = statusMan
-	
 		self.notifier = notifier
 
 		threading.Thread.__init__(self)
-		self.logger.debug("init done")
 
 	def run(self):
 		self.logger.debug("run")
@@ -138,10 +135,11 @@ class NotificationManager(threading.Thread):
 				sock.connect(self.socketFile)
 			except socket.error:
 				self.statusMan.setStatus(AppStatus.STATUS_ERROR)
-				#FIXME:try to reconnect automatically every x seconds ?
 				logger.warn("error connecting to server, waiting for reconnect signal")
+
+				# wait for user to ask to reconnect
 				while(self.statusMan.getStatus() != AppStatus.STATUS_RECONNECT):
-					time.sleep(0.2) #FIXME: waits for status updates...
+					time.sleep(0.2)
 				continue
 			except:
 				logger.error( "Unknown Error:",sys.exc_info()[0])
@@ -153,23 +151,14 @@ class NotificationManager(threading.Thread):
 
 		self.logger.debug("Connected to server")
 		while True:
+			jsonData = None
 			try:
+				# blocks...
 				jsonData = sock.recv(1024)
 		
 				if not jsonData:
 					self.logger.debug( "...connection closed")
 					break
-				self.logger.debug( "Message recv:"+str(jsonData))
-
-				data = json.loads(jsonData)
-				message = data['message']
-				filterName = data['filter']
-		
-				if(self.statusMan.getStatus() == AppStatus.STATUS_DISABLED):
-					logger.debug( "ignoring message")
-					continue
-
-				self.notifier.showMessage(filterName, message)
 			except KeyboardInterrupt:
 				self.logger.warn( "notMan:Terminated by user")
 				sock.close()
@@ -180,6 +169,24 @@ class NotificationManager(threading.Thread):
 				self.logger.error("notMan:Terminated! Error:"+str(sys.exc_info()[0]))
 				traceback.print_exc()
 				break
+
+			try:
+				self.logger.debug( "Message recv:"+str(jsonData))
+
+				data = json.loads(jsonData)
+				message = data['message']
+				filterName = data['filter']
+				updatable = True #TODO
+		
+				if(self.statusMan.getStatus() == AppStatus.STATUS_DISABLED):
+					logger.debug( "ignoring message")
+					continue
+
+				self.notifier.showMessage(filterName, message, updatable)
+			except:
+				self.logger.error("Error decoding and display message: "+str(jsonData))
+				continue
+
 		print ("...got here?")
 		self.run()
 
@@ -194,14 +201,6 @@ def absolutePath():
 #__main__:
 
 parser = argparse.ArgumentParser(description='Incoming Network Activity Client.')
-
-#TODO: perhaps enable inet socket as well
-# parser.add_argument('-p', '--port',
-#	dest='port',
-#	required=False,
-#	metavar='port',
-#	default=DEFAULT_PORT,
-#	help='Port to connect on server. If a file is specified will create socket at file.')
 
 parser.add_argument('-f', '--socketFile',
 	dest='socketFile',
@@ -289,16 +288,37 @@ if FEATURES['interface'] == "gtk":
 				exit_gracefully()
 			self.logger.debug( "Nofity init.")
 
-		def showMessage(self,filterName, message):
+		def showMessage(self,filterName, message, updatable):
 			try:
+				notificationTitle = "Inactcli"
+
+				if updatable and filterName in self.notifications:
+					notification = self.notifications[filterName]
+					notification.update(
+						notificationTitle,
+						message)
+					if not notification.show():
+						self.logger.warn( "Unable to show updated notification")						
+					else:
+						return
+
 				pathDir = absolutePath()
 				notification = Notify.Notification.new(
-					"Inactcli",
-					message, absolutePath+"/"+ICONS['active']['filename'])
+					notificationTitle,
+					message, 
+					pathDir+"/"+ICONS['active']['filename'])
 
 					# Ubuntu needed this?
 					#"notification-message-email")
 				notification.set_urgency(Notify.Urgency.NORMAL)
+
+				def actionCallback(notification, action, user_data = None):
+					self.logger.debug("callbackCalled:"+action)
+
+				notification.add_action(filterName+"-action", "Action", actionCallback)
+
+				if updatable:
+					self.notifications[filterName] = notification
 				
 				# Ubuntu needed this ? 
 				#notification.set_hint_string("x-canonical-append","")
@@ -317,7 +337,7 @@ else:
 			self.logger = logger
 			self.logger.info( "notifier init: no interface. Falling back to terminal.")
 
-		def showMessage(self, filterName, message):
+		def showMessage(self, filterName, message, updatable):
 			# TODO use logger?
 			print (message)
 
