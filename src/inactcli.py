@@ -323,7 +323,8 @@ else:
 
 if FEATURES['interface'] == "gtk":
 	# FIXME this is not a class?
-	def aboutDialog(widget, event=None):
+	class AboutDialog:
+		def __init__(self, widget, event, logger):
 #			self.logger = logger.newLogger('aboutDialog-gtk')
 			
 #			self.logger.debug('init')
@@ -331,7 +332,7 @@ if FEATURES['interface'] == "gtk":
 			
 			aboutdialog.set_name("Inactmon-cli")
 			aboutdialog.set_version("1.0")
-			aboutdialog.set_copyright("Don't redistribute! :P")
+			aboutdialog.set_copyright("Don't redistribute! ;)")
 			aboutdialog.set_comments("Shows notifications about incomming activity based on pcap rules.")
 			aboutdialog.set_authors(["Oliver Kuster"])
 
@@ -350,8 +351,8 @@ if FEATURES['interface'] == "gtk":
 			aboutdialog.destroy()
 #			self.logger.debug('done')
 else:
-	class aboutDialog:
-		def __init__(self, logger):
+	class AboutDialog:
+		def __init__(self, widget, event, logger):
 			self.logger = logger.newLogger('aboutDialog-none')
 			self.logger.debug('init')
 			self.logger.warn( "interface not specified...")
@@ -393,7 +394,7 @@ if FEATURES['tray'] == "gtk":
 			self.menu.popup(None, None, None, None, button, time)
 
 		def aboutdialog(self, widget, event=None):
-			aboutDialog(self.logger)
+			AboutDialog(widget, event, self.logger)
 
 		def status_button(self,widget, event=None):
 			self.statusMan.updateStatusByButton()
