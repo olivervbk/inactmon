@@ -32,10 +32,8 @@ python2 src/inactcli.py
 
 
 TODO:
-* improve notifications speed/recurrence
-* check code related to configuration files
-* more filters
-* improve client
+* create a better formatted README (README.md?)
+more in TODO file
 
 LICENSE:
 Don't redistribute for money.
