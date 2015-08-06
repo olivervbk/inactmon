@@ -348,9 +348,13 @@ def reload_config():
 #TODO:implement
 	print ("\nreload config")
 
+def absolutePath():
+	pathDir = os.path.dirname(os.path.realpath(__file__))
+	return pathDir
+
 def loadModule(name, path=None):
 	if path == None:
-		pathDir = os.path.dirname(os.path.realpath(__file__))
+		pathDir = absolutePath()
 		path = pathDir+"/modules/"+name+".py"
 	return imp.load_source(name, path)
 
