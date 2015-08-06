@@ -52,7 +52,7 @@ else:
 	print ("Python version unknown: %s" % sys.version_info)
 	sys.exit(1)
 
-class appStatus:
+class AppStatus:
 	STATUS_OK = 1
 	STATUS_DISABLED = 2
 	STATUS_ERROR = 3
@@ -70,14 +70,13 @@ class appStatus:
 		return self.status
 
 	def updateStatusByButton(self):
-		if self.status == appStatus.STATUS_OK:
-			self.setStatus(appStatus.STATUS_DISABLED)
-		elif self.status == appStatus.STATUS_DISABLED:
-			self.setStatus(appStatus.STATUS_OK)
-		elif self.status == appStatus.STATUS_ERROR:
-			self.setStatus(appStatus.STATUS_RECONNECT)
-		elif self.status == appStatus.STATUS_RECONNECT:
-			#do nothing :D
+		if self.status == self.STATUS_OK:
+			self.setStatus(self.STATUS_DISABLED)
+		elif self.status == self.STATUS_DISABLED:
+			self.setStatus(self.STATUS_OK)
+		elif self.status == self.STATUS_ERROR:
+			self.setStatus(self.STATUS_RECONNECT)
+		elif self.status == self.STATUS_RECONNECT:
 			pass
 
 	def setStatus(self, status):
@@ -94,6 +93,7 @@ class appStatus:
 			if status != self.STATUS_DISABLED:
 				self.status = status
 		self.updateMenu()
+
 	def updateMenu(self):
 		if self.status == self.STATUS_OK:
 			self.tray.setIcon(icon = "active", status = "active")
@@ -112,7 +112,7 @@ class appStatus:
 			self.tray.setActionLabel(label = "Reconnecting...")
 			#FIXME:disable button =/ and reenable elsewheres?
 
-class notificationManager(threading.Thread):
+class NotificationManager(threading.Thread):
 	server = ''
 	port = ''
 	notifier = None
@@ -137,10 +137,10 @@ class notificationManager(threading.Thread):
 				sock = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
 				sock.connect(self.socketFile)
 			except socket.error:
-				self.statusMan.setStatus(appStatus.STATUS_ERROR)
+				self.statusMan.setStatus(AppStatus.STATUS_ERROR)
 				#FIXME:try to reconnect automatically every x seconds ?
 				logger.warn("error connecting to server, waiting for reconnect signal")
-				while(self.statusMan.getStatus() != appStatus.STATUS_RECONNECT):
+				while(self.statusMan.getStatus() != AppStatus.STATUS_RECONNECT):
 					time.sleep(0.2) #FIXME: waits for status updates...
 				continue
 			except:
@@ -149,7 +149,7 @@ class notificationManager(threading.Thread):
 			break
 		
 		#if status was reconnecting... 
-		self.statusMan.setStatus(appStatus.STATUS_OK)
+		self.statusMan.setStatus(AppStatus.STATUS_OK)
 
 		self.logger.debug("Connected to server")
 		while True:
@@ -165,7 +165,7 @@ class notificationManager(threading.Thread):
 				message = data['message']
 				filterName = data['filter']
 		
-				if(self.statusMan.getStatus() == appStatus.STATUS_DISABLED):
+				if(self.statusMan.getStatus() == AppStatus.STATUS_DISABLED):
 					logger.debug( "ignoring message")
 					continue
 
@@ -359,7 +359,7 @@ else:
 			self.logger.debug('done')
 
 if FEATURES['tray'] == "gtk":
-	class trayIcon(Gtk.StatusIcon):
+	class TrayIcon(Gtk.StatusIcon):
 		logger = None
 
 		def __init__(self, statusMan, logger):
@@ -409,7 +409,7 @@ if FEATURES['tray'] == "gtk":
 			self.status_item.set_label(label)
 
 else:
-	class trayIcon:
+	class TrayIcon:
 		logger = None
 
 		def __init__(self,statusMan, logger):
@@ -427,14 +427,12 @@ else:
 
 
 #FIXME:Fruit salad..
-statusMan = appStatus()
+statusMan = AppStatus()
 
 trayLogger = logger.newLogger('trayIcon')
-tray = trayIcon(statusMan, trayLogger)
+tray = TrayIcon(statusMan, trayLogger)
 statusMan.setTray(tray)
 
-if FEATURES['interface'] == "gtk":
-	Gdk.threads_init() # this makes gtk to allow threads =/
 
 logger.info("Threading notificationManager")
 
@@ -442,14 +440,20 @@ notifierLogger = logger.newLogger('AppNotifier')
 notifier = AppNotifier(notifierLogger)
 
 notManLogger = logger.newLogger('notMan')
-notMan = notificationManager( args.socketFile, statusMan, notManLogger, notifier)
+notMan = NotificationManager( args.socketFile, statusMan, notManLogger, notifier)
 notMan.setDaemon(True)
 notMan.start()
 
 try:
 	if FEATURES['interface'] == "gtk":
+
+		# correct signal kill in GTK3
 		import signal
 		signal.signal(signal.SIGINT, signal.SIG_DFL)
+
+		# this makes gtk to allow threads =/
+		Gdk.threads_init() 
+
 		Gtk.main()
 	else:
 		#just sleep?
