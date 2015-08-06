@@ -117,14 +117,14 @@ class notificationManager(threading.Thread):
 	port = ''
 	notifier = None
 
-	def __init__(self, socketFile, statusMan, logger):
-		self.logger = logger.newLogger('notMan')
+	def __init__(self, socketFile, statusMan, logger, notifier):
+		self.logger = logger
 		self.logger.debug("init")
 	
 		self.socketFile = socketFile
 		self.statusMan = statusMan
 	
-		self.notifier = AppNotifier()
+		self.notifier = notifier
 
 		threading.Thread.__init__(self)
 		self.logger.debug("init done")
@@ -277,35 +277,52 @@ logger.debug("Using interface:"+FEATURES['interface'])
 
 if FEATURES['interface'] == "gtk":
 	class AppNotifier:
-		def __init__(self):
+		logger = None
+		
+		notifications = {}
+
+		def __init__(self, logger):
+			self.logger = logger
+
 			if not Notify.init('Inactcli'):
-				logger.error( "error initializing Notify.")
+				self.logger.error( "error initializing Notify.")
 				exit_gracefully()
-			logger.debug( "Nofity init.")
+			self.logger.debug( "Nofity init.")
+
 		def showMessage(self,filterName, message):
 			try:
 				pathDir = absolutePath()
 				notification = Notify.Notification.new(
 					"Inactcli",
 					message, absolutePath+"/"+ICONS['active']['filename'])
+
+					# Ubuntu needed this?
 					#"notification-message-email")
 				notification.set_urgency(Notify.Urgency.NORMAL)
-				notification.set_hint_string("x-canonical-append","")
+				
+				# Ubuntu needed this ? 
+				#notification.set_hint_string("x-canonical-append","")
 				#notification.attach_to_widget(self)
 				if not notification.show():
-					logger.warn( "Unable to show notification")
+					self.logger.warn( "Unable to show notification")
 			except:
-				logger.error("AppNotifier: Error:"+str(sys.exc_info()[0]))
+				self.logger.error("AppNotifier: Error:"+str(sys.exc_info()[0]))
 				traceback.print_exc()
 				
 else:
 	class AppNotifier:
-		def __init__(self):
-			logger.info( "notifier init: no interface. Falling back to terminal.")
+		logger = None
+
+		def __init__(self, logger):
+			self.logger = logger
+			self.logger.info( "notifier init: no interface. Falling back to terminal.")
+
 		def showMessage(self, filterName, message):
+			# TODO use logger?
 			print (message)
 
 if FEATURES['interface'] == "gtk":
+	# FIXME this is not a class?
 	def aboutDialog(widget, event=None):
 #			self.logger = logger.newLogger('aboutDialog-gtk')
 			
@@ -319,6 +336,8 @@ if FEATURES['interface'] == "gtk":
 			aboutdialog.set_authors(["Oliver Kuster"])
 
 			absPath = absolutePath()
+
+			# FIXME externalize
 			logoPath = absPath+"/"+"../images/eye-version3-active.svg"
 			logoImg = GdkPixbuf.Pixbuf.new_from_file_at_size(logoPath,100,100)
 			aboutdialog.set_logo(logoImg)
@@ -340,6 +359,8 @@ else:
 
 if FEATURES['tray'] == "gtk":
 	class trayIcon(Gtk.StatusIcon):
+		logger = None
+
 		def __init__(self, statusMan, logger):
 			self.logger = logger.newLogger('trayIcon-gtk')
 			
@@ -388,6 +409,8 @@ if FEATURES['tray'] == "gtk":
 
 else:
 	class trayIcon:
+		logger = None
+
 		def __init__(self,statusMan, logger):
 			self.logger = logger.newLogger('trayIcon-none')
 			
@@ -404,14 +427,21 @@ else:
 
 #FIXME:Fruit salad..
 statusMan = appStatus()
-tray = trayIcon(statusMan, logger)
+
+trayLogger = logger.newLogger('trayIcon')
+tray = trayIcon(statusMan, trayLogger)
 statusMan.setTray(tray)
 
 if FEATURES['interface'] == "gtk":
 	Gdk.threads_init() # this makes gtk to allow threads =/
 
 logger.info("Threading notificationManager")
-notMan = notificationManager( args.socketFile, statusMan, logger)
+
+notifierLogger = logger.newLogger('AppNotifier')
+notifier = AppNotifier(notifierLogger)
+
+notManLogger = logger.newLogger('notMan')
+notMan = notificationManager( args.socketFile, statusMan, notManLogger, notifier)
 notMan.setDaemon(True)
 notMan.start()
 
