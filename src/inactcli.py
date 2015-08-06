@@ -188,6 +188,10 @@ def exit_gracefully():
 	logger.debug( "exiting gracefully...")
 	Gtk.main_quit() #w00t!
 
+def absolutePath():
+	pathDir = os.path.dirname(os.path.realpath(__file__))
+	return pathDir
+
 #__main__:
 
 parser = argparse.ArgumentParser(description='Incoming Netword Activity Client.')
@@ -281,9 +285,10 @@ if FEATURES['interface'] == "gtk":
 			logger.debug( "Nofity init.")
 		def showMessage(self,filterName, message):
 			try:
+				pathDir = absolutePath()
 				notification = Notify.Notification.new(
 					"Inactcli",
-					message, ICONS['active']['filename'])
+					message, absolutePath+"/"+ICONS['active']['filename'])
 					#"notification-message-email")
 				notification.set_urgency(Notify.Urgency.NORMAL)
 				notification.set_hint_string("x-canonical-append","")
@@ -313,7 +318,11 @@ if FEATURES['interface'] == "gtk":
 			aboutdialog.set_copyright("Don't redistribute! :P")
 			aboutdialog.set_comments("Shows notifications about incomming activity based on pcap rules.")
 			aboutdialog.set_authors(["Oliver Kuster"])
-			aboutdialog.set_logo(GdkPixbuf.Pixbuf.new_from_file_at_size("../images/eye-version3-active.svg",100,100))
+
+			absPath = absolutePath()
+			logoPath = absPath+"/"+"../images/eye-version3-active.svg"
+			logoImg = GdkPixbuf.Pixbuf.new_from_file_at_size(logoPath,100,100)
+			aboutdialog.set_logo(logoImg)
 #			self.logger.debug('done setting values, running')
 			
 		
@@ -338,7 +347,8 @@ if FEATURES['tray'] == "gtk":
 			self.statusMan = statusMan
 			Gtk.StatusIcon.__init__(self)
 			
-			self.set_from_file(ICONS['active']['filename'])
+			pathDir = absolutePath()
+			self.set_from_file(pathDir+"/"+ICONS['active']['filename'])
 			#self.set_tooltip('Inactcli')
 			self.set_visible(True)
 
@@ -408,6 +418,8 @@ notMan.start()
 
 try:
 	if FEATURES['interface'] == "gtk":
+		import signal
+		signal.signal(signal.SIGINT, signal.SIG_DFL)
 		Gtk.main()
 	else:
 		#just sleep?
